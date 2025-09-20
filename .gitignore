@@ -1,0 +1,13 @@
+# Ignore ROS2 build artifacts
+build/
+install/
+log/
+
+# Python cache
+*.pyc
+__pycache__/
+
+# Editor configs
+.vscode/
+*.swp
+*.DS_Store
