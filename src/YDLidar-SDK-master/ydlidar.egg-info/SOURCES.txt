@@ -1,0 +1,8 @@
+LICENSE.txt
+README.md
+setup.py
+ydlidar.egg-info/PKG-INFO
+ydlidar.egg-info/SOURCES.txt
+ydlidar.egg-info/dependency_links.txt
+ydlidar.egg-info/not-zip-safe
+ydlidar.egg-info/top_level.txt
