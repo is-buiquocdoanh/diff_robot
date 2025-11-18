@@ -21,7 +21,7 @@ def generate_launch_description():
                 '-configuration_basename', configuration_basename
             ],
             remappings=[
-                ('/odom', '/odom_rf2o'),
+                # ('/odom', '/odom_rf2o'),
                 ('/scan', '/scan')
             ],
             parameters=[{'use_sim_time': False}]

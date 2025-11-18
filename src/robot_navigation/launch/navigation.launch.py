@@ -24,7 +24,7 @@ def generate_launch_description():
     namespace = LaunchConfiguration('namespace')
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
-        'use_sim_time', default_value='true')       # False để test trên robot thật
+        'use_sim_time', default_value='false')       # False để test trên robot thật
 
     declare_slam_cmd = DeclareLaunchArgument(
         'slam', default_value='False')              # True nếu muốn dùng SLAM, False nếu đã có map
