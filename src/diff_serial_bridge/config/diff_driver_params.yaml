@@ -1,0 +1,8 @@
+diff_driver:
+  ros__parameters:
+    serial_port: "/dev/arduino"
+    baud_rate: 57600
+    encoder_cpr: 1975
+    wheel_diameter: 0.035
+    base_width: 0.29
+    loop_rate: 30
