@@ -15,6 +15,12 @@ def generate_launch_description():
         'maps',
         'my_map.yaml'
     )
+    
+    rviz_config = os.path.join(
+    get_package_share_directory('robot_navigation'),
+    'rviz',
+    'nav2_default_view.rviz'
+    )
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     slam = LaunchConfiguration('slam')
@@ -77,7 +83,8 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': use_sim_time,
             'rviz': rviz,
-            'namespace': namespace
+            'namespace': namespace,
+            'rviz_config': rviz_config
         }.items()
     )
 

@@ -53,7 +53,7 @@ def generate_launch_description():
         robot_description_launch,
         robot_joy,
         robot_kinematic,
-        rf2o_launch
+        # rf2o_launch
     ])
 
  # save map

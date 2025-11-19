@@ -27,7 +27,6 @@ def generate_launch_description():
         )
     )
 
-
     return LaunchDescription([
         diff_serial_bridge_launch,
         ylidar_launch,
