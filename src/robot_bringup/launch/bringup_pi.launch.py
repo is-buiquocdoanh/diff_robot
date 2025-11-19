@@ -6,12 +6,12 @@ import os
 
 def generate_launch_description():
     # diff_serial_bridge
-    diff_serial_bridge_launch = IncludeLaunchDescription(
+    diff_driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
                 get_package_share_directory('diff_serial_bridge'),
                 'launch',
-                'diff_drive.launch.py'
+                'diff_driver.launch.py'
             )
         )
     )
@@ -28,7 +28,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        diff_serial_bridge_launch,
+        diff_driver,
         ylidar_launch,
     ])
 
