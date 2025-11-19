@@ -1,8 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="diff_robot">
 
-
-  <xacro:include filename="inertial_macros.xacro"/>
   <!-- ======= Parameters ======= -->
   <xacro:property name="robot_length" value="0.25"/>
   <xacro:property name="robot_width"  value="0.25"/>
