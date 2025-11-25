@@ -1,117 +1,153 @@
 import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+
     package_dir = get_package_share_directory('robot_navigation')
-    nav2_dir = get_package_share_directory('nav2_bringup')
-    map_file_default = os.path.join(
-        package_dir,
-        'maps',
-        'my_map.yaml'
-    )
-    
-    rviz_config = os.path.join(
-    get_package_share_directory('robot_navigation'),
-    'rviz',
-    'nav2_default_view.rviz'
-    )
+    map_file = os.path.join(package_dir, 'maps', 'my_map.yaml')
+    params_file = os.path.join(package_dir, 'config', 'nav2_params.yaml')
+    rviz_config = os.path.join(package_dir, 'rviz', 'nav2_default_view.rviz')
 
-    use_sim_time = LaunchConfiguration('use_sim_time')
-    slam = LaunchConfiguration('slam')
-    rviz = LaunchConfiguration('rviz')
-    map_file = LaunchConfiguration('map')
-    params_file = LaunchConfiguration('params_file')
-    namespace = LaunchConfiguration('namespace')
-
-    declare_use_sim_time_cmd = DeclareLaunchArgument(
-        'use_sim_time', default_value='false')       # False để test trên robot thật
-
-    declare_slam_cmd = DeclareLaunchArgument(
-        'slam', default_value='False')              # True nếu muốn dùng SLAM, False nếu đã có map
-
-    declare_use_rviz_cmd = DeclareLaunchArgument(
-        'rviz', default_value='True')               # True để hiển thị rviz, False để không hiển thị
-
-    declare_map_cmd = DeclareLaunchArgument(
-        'map', default_value=map_file_default)
-
-    declare_nav_params_cmd = DeclareLaunchArgument(
-        'params_file', default_value=os.path.join(
-            package_dir,
-            'config',
-            'nav2_params.yaml')
-    )
-
-    declare_namespace_cmd = DeclareLaunchArgument(
-        'namespace', default_value=''
-    )
-
-    localization_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav2_dir, 'launch', 'localization_launch.py')
-        ),
-        launch_arguments={
-            'use_sim_time': use_sim_time,
-            'slam': slam,
-            'map': map_file,
-            'params_file': params_file,
-            'namespace': namespace
-        }.items()
-    )
-
-    navigation_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav2_dir, 'launch', 'navigation_launch.py')
-        ),
-        launch_arguments={
-            'use_sim_time': use_sim_time,
-            'params_file': params_file,
-            'namespace': namespace
-        }.items()
-    )
-
-    rviz_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav2_dir, 'launch', 'rviz_launch.py')
-        ),
-        launch_arguments={
-            'use_sim_time': use_sim_time,
-            'rviz': rviz,
-            'namespace': namespace,
-            'rviz_config': rviz_config
-        }.items()
-    )
-
-    # Khởi động map_server riêng với use_sim_time
-    map_server_node = Node(
-        package='nav2_map_server',
+    # MAP SERVER
+    map_server = Node(
+        package='nav2_map_server',  
         executable='map_server',
         name='map_server',
         output='screen',
-        parameters=[
-            {'yaml_filename': map_file_default},
-            {'use_sim_time': use_sim_time}  # dùng LaunchConfiguration
-        ]
+        parameters=[{'yaml_filename': map_file},
+                    {'use_sim_time': False}]
     )
 
-    ld = LaunchDescription()
+    # MAP SERVER UPDATE
+    map_saver = Node(
+        package='nav2_map_server',
+        executable='map_saver_server',
+        name='map_saver',
+        output='screen',
+        parameters=[params_file]
+    )
 
-    ld.add_action(declare_use_sim_time_cmd)
-    ld.add_action(declare_slam_cmd)
-    ld.add_action(declare_nav_params_cmd)
-    ld.add_action(declare_use_rviz_cmd)
-    ld.add_action(declare_map_cmd)
-    ld.add_action(declare_namespace_cmd)
+    # AMCL
+    amcl = Node(
+        package='nav2_amcl',
+        executable='amcl',
+        name='amcl',
+        output='screen',
+        parameters=[params_file]
+    )
 
-    ld.add_action(localization_cmd)
-    ld.add_action(navigation_cmd)
-    ld.add_action(rviz_cmd)
-    ld.add_action(map_server_node)
+    # PLANNER
+    planner_server = Node(
+        package='nav2_planner',
+        executable='planner_server',
+        name='planner_server',
+        output='screen',
+        parameters=[params_file]
+    )
 
-    return ld
+    # CONTROLLER
+    controller_server = Node(
+        package='nav2_controller',
+        executable='controller_server',
+        name='controller_server',
+        output='screen',
+        parameters=[params_file]
+    )
+
+    # SMOOTHER SERVER (bắt buộc)
+    smoother_server = Node(
+        package='nav2_smoother',
+        executable='smoother_server',
+        name='smoother_server',
+        output='screen',
+        parameters=[params_file]
+    )
+
+    # BEHAVIOR TREE NAVIGATOR
+    bt_navigator = Node(
+        package='nav2_bt_navigator',
+        executable='bt_navigator',
+        name='bt_navigator',
+        output='screen',
+        parameters=[params_file]
+    )
+
+    # RECOVERY SERVER (bắt buộc)
+    behavior_server = Node(
+        package='nav2_behaviors',
+        executable='behavior_server',
+        name='behavior_server',
+        output='screen',
+        parameters=[params_file]
+    )
+
+    # VELOCITY SMOOTHER (tùy nhưng nên có)
+    velocity_smoother = Node(
+        package='nav2_velocity_smoother',
+        executable='velocity_smoother',
+        name='velocity_smoother',
+        output='screen',
+        parameters=[params_file]
+    )
+    
+    lifecycle_manager_loc = Node(
+    package='nav2_lifecycle_manager',
+    executable='lifecycle_manager',
+    name='lifecycle_manager_localization',
+    output='screen',
+    parameters=[{
+            'use_sim_time': False,
+            'autostart': True,
+            'node_names': [
+                'map_server',
+                'map_saver',
+                'amcl'
+            ]
+        }]
+    )
+
+    # LIFECYCLE MANAGER
+    lifecycle_manager_nav = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_navigation',
+        output='screen',
+        parameters=[{
+            'use_sim_time': False,
+            'autostart': True,
+            'node_names': [
+                'planner_server',
+                'controller_server',
+                'smoother_server',
+                'bt_navigator',
+                'behavior_server',
+                'velocity_smoother'
+            ]
+        }]
+    )
+
+    # RVIZ
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config]
+    )
+
+    return LaunchDescription([
+        map_server,
+        map_saver,
+        amcl,
+        planner_server,
+        controller_server,
+        smoother_server,
+        bt_navigator,
+        behavior_server,
+        velocity_smoother,
+        lifecycle_manager_loc,
+        lifecycle_manager_nav,
+        rviz_node
+    ])
