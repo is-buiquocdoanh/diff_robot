@@ -15,7 +15,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 	serial_port_arg = DeclareLaunchArgument(
-		'serial_port', default_value='ttyUSB1', description='Serial device name (no /dev/)')
+		'serial_port', default_value='esp32', description='Serial device name (no /dev/)')
 
 	baudrate_arg = DeclareLaunchArgument(
 		'baudrate', default_value='115200', description='Serial baudrate')

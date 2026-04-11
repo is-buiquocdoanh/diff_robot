@@ -100,7 +100,7 @@ class SerialROSBridge(LifecycleNode):
         self.killnode = 0
 
         self.declare_parameters('', [
-            ('serial_port', "ttyUSB1"),
+            ('serial_port', "esp32"),
             ('baudrate', 115200)
         ])
 
