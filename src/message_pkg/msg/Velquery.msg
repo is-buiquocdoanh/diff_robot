@@ -1,0 +1,9 @@
+int32 id
+int16 byte0
+int16 byte1
+int16 byte2
+int16 byte3
+int16 byte4
+int16 byte5
+int16 byte6
+int16 byte7
