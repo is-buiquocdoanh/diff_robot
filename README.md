@@ -73,6 +73,7 @@ ros2 run nav2_map_server map_saver_cli -f my_map
 - smoother server
 - BT navigator
 - Lifecycle manager
+- Can use localization SLAM Toolbox
 
 ```
 ros2 launch robot_navigation naviagation.launch.py
