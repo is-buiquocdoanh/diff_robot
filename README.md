@@ -90,3 +90,4 @@ This project is released under the [MIT License](https://opensource.org/license/
 
 yolo-1
 yolo-2
+yolo-3
