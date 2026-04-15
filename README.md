@@ -89,3 +89,4 @@ ros2 launch robot_navigation naviagation.launch.py
 This project is released under the [MIT License](https://opensource.org/license/mit)
 
 yolo-1
+yolo-2
