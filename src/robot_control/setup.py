@@ -29,6 +29,7 @@ setup(
         'console_scripts': [
             'ros_serial_bridge = robot_control.ros_serial_bridge:main',
             'kinematic = robot_control.kinematic:main',
+            'kinematic_serial = robot_control.kinematic_serial:main',
         ],
     },
 )
