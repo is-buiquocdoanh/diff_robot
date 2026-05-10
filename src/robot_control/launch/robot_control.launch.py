@@ -20,30 +20,20 @@ def generate_launch_description():
 	baudrate_arg = DeclareLaunchArgument(
 		'baudrate', default_value='115200', description='Serial baudrate')
 
-	# Node: serial bridge
-	serial_node = Node(
+	kinematic_serial = Node(
 		package='robot_control',
-		executable='ros_serial_bridge',
-		name='ros_serial_bridge',
+		executable='kinematic_serial',
+		name='kinematic_serial',
 		output='screen',
-		parameters=[{
-			'serial_port': LaunchConfiguration('serial_port'),
-			'baudrate': LaunchConfiguration('baudrate')
-		}]
-	)
-
-	# Node: kinematic
-	kinematic_node = Node(
-		package='robot_control',
-		executable='kinematic',
-		name='kinematic',
-		output='screen'
-	)
-
+		parameters=[
+			{'serial_port': LaunchConfiguration('serial_port')},
+			{'baudrate': LaunchConfiguration('baudrate')},
+		]
+	)	
+ 
 	return LaunchDescription([
 		serial_port_arg,
 		baudrate_arg,
-		serial_node,
-		kinematic_node,
+		kinematic_serial,
 	])
 
