@@ -5,31 +5,31 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 def generate_launch_description():
-    # mecanum_joy
-    mecanum_joy_launch = IncludeLaunchDescription(
+    # robot_joy
+    robot_joy_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory('mecanum_joy'),
+                get_package_share_directory('robot_joy'),
                 'launch',
-                'mecanum_joy.launch.py'
+                'robot_joy.launch.py'
             )
         )
     )
 
-    # rf2o_laser_odometry (chạy trên laptop)
-    rf2o_launch = IncludeLaunchDescription(
+    # laser_filter
+    laser_filter_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory('rf2o_laser_odometry'),
+                get_package_share_directory('laser_filter'),
                 'launch',
-                'rf2o_laser_odometry.launch.py'
+                'laser_filter.launch.py'
             )
         )
     )
 
     return LaunchDescription([
-        mecanum_joy_launch,
-        rf2o_launch
+        robot_joy_launch,
+        laser_filter_launch
     ])
 
  # save map
