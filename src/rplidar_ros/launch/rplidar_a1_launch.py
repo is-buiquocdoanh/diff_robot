@@ -18,23 +18,7 @@ def generate_launch_description():
     inverted = LaunchConfiguration('inverted', default='false')
     angle_compensate = LaunchConfiguration('angle_compensate', default='true')
     scan_mode = LaunchConfiguration('scan_mode', default='Sensitivity')
-    
-    tf2_node = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_tf_pub_laser',
-        arguments=[
-            '0', '0', '0',   # vị trí
-            '0', '0', '1', '0',  # roll pitch yaw (xoay 180 độ quanh Z)
-            'base_link',
-            'laser'
-        ],
-    )
-    
     return LaunchDescription([
-
-        tf2_node,
-
         DeclareLaunchArgument(
             'channel_type',
             default_value=channel_type,
