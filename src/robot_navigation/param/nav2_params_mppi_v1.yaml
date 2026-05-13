@@ -158,7 +158,7 @@ controller_server:
       vy_std: 0.0
       wz_std: 0.6 
       vx_max: 0.4
-      vx_min: 0.0
+      vx_min: -0.4
       vy_max: 0.0 
       wz_max: 1.0 
       ax_min: -2.0   # Gia tốc tuyến tính tối thiểu (m/s²) - cho phép lùi
