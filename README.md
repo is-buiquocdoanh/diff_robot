@@ -34,18 +34,6 @@ Hình ảnh phần cứng:
   <img src="docs/6.jpg" width="30%">
 </p>
 
-## Control (ESP32 / Arduino)
-
-ESP32/Arduino chịu trách nhiệm đọc encoder, điều khiển công suất (PWM), và trả về thông tin odometry cơ bản (encoder ticks, tốc độ motor). Có hai kiểu triển khai phổ biến trong repo này:
-
-- Firmware trên ESP32/Arduino: đọc encoder, chạy PID (nếu cần), gửi dữ liệu qua serial theo định dạng đơn giản.
-- Trên Raspberry Pi: một node ROS2 (serial bridge) đọc dữ liệu serial, chuyển thành các topic ROS2 (ví dụ `/odom`, `/joint_states`) và nhận lệnh vận tốc (`/cmd_vel`) để gửi tới ESP32.
-
-Những giả định thông thường (nếu bạn dùng firmware khác, điều chỉnh tương ứng):
-- Baud rate serial: 115200
-- Cổng serial trên Pi thường là `/dev/ttyUSB0` hoặc `/dev/ttyACM0` (kiểm tra bằng `ls /dev/ttyUSB*`)
-
-Thực tế cụ thể của node bridge (tên và tham số) có thể khác giữa các package; xem package `robot_bringup` hoặc `robot_control` để biết tên node và tham số chính xác.
 
 ## Communication between ROS2 ↔ ESP32
 ### ESP32
@@ -220,7 +208,7 @@ ros2 launch route_manager route_manager.launch.py
 - Sau khi đã có danh sách điểm route.yaml và khởi động nav2
 - Chạy file launch trên để robot thực hiện nhiệm vụ theo route
 
-<img src="docs/7.png" width="70%">
+<img src="docs/7.png" width="100%">
 
 ### [Video demo](https://youtu.be/bw5MeLfEKC0)
 
