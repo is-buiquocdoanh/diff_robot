@@ -2,6 +2,10 @@
 #include "driver/pcnt.h"
 #include <ctype.h>
 #include "can_serial.h"
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
 
 // Encoder pins (same as your original configuration)
 #define ENC_LEFT_FRONT_A 4
@@ -42,6 +46,33 @@ unsigned long lastPacketMillis = 0;
 // PWM settings
 const int PWM_FREQ = 2000;
 const int PWM_RES = 8; // 8-bit
+
+// IMU (BNO055, I2C). GPIO22 is already used by ENC_RIGHT_FRONT_B, so the I2C
+// bus is remapped away from the ESP32 default pins (21/22) to avoid conflict.
+#define IMU_SDA_PIN 21
+#define IMU_SCL_PIN 19
+Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDRESS_A, &Wire);
+bool imuReady = false;
+const unsigned long IMU_SEND_INTERVAL = 20; // ms (~50 Hz)
+unsigned long lastImuSend = 0;
+
+// Reads the BNO055's onboard sensor fusion output and sends it to the Pi over
+// UART2 as a plain-text CSV line. Kept on Serial2 (not USB) so it never mixes
+// with the binary CAN-serial motor-command frames on Serial.
+void sendImuData() {
+  imu::Quaternion quat = bno.getQuat();
+  imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);     // rad/s
+  imu::Vector<3> lacc = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);   // m/s^2, gravity removed
+
+  uint8_t sys, gyroCal, accelCal, magCal;
+  bno.getCalibration(&sys, &gyroCal, &accelCal, &magCal);
+
+  Serial2.printf("IMU,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u\n",
+                 quat.w(), quat.x(), quat.y(), quat.z(),
+                 gyro.x(), gyro.y(), gyro.z(),
+                 lacc.x(), lacc.y(), lacc.z(),
+                 sys, gyroCal, accelCal, magCal);
+}
 
 void setupPCNT(pcnt_unit_t unit, int pinA, int pinB) {
   pcnt_config_t pcntConfig;
@@ -129,6 +160,17 @@ void setup() {
   Serial.println("BTS7960 motor test ready.");
   Serial.println("Commands:\n  L <pwm 0-255> <dir 0|1|2>   - set left motor\n  R <pwm> <dir> - set right motor\n  S - stop both");
 
+  // IMU init
+  Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN);
+  if (!bno.begin()) {
+    Serial.println("[IMU] BNO055 not detected - check wiring/address");
+    imuReady = false;
+  } else {
+    delay(50);
+    bno.setExtCrystalUse(true);
+    imuReady = true;
+    Serial.println("[IMU] BNO055 ready");
+  }
 }
 
 // Note: ASCII parsing below uses a fixed buffer and C-style parsing to avoid Arduino String.
@@ -166,6 +208,16 @@ void loop() {
     set_bts7960_pwm(CH_L_A, CH_L_B, lf_pwm, lf_dir);
     set_bts7960_pwm(CH_R_A, CH_R_B, rf_pwm, rf_dir);
     Serial.printf("[RX] CAN-Serial -> L pwm=%d dir=%d | R pwm=%d dir=%d\n", lf_pwm, lf_dir, rf_pwm, rf_dir);
+  }
+
+  // Stream IMU data to the Pi over UART2 at a fixed rate, independent of
+  // motor-command traffic on Serial.
+  if (imuReady) {
+    unsigned long nowImu = millis();
+    if (nowImu - lastImuSend >= IMU_SEND_INTERVAL) {
+      lastImuSend = nowImu;
+      sendImuData();
+    }
   }
 
   // Safety: if no binary packet received for PACKET_TIMEOUT_MS, stop motors

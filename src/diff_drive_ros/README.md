@@ -21,6 +21,10 @@ Encoders (quadrature)
 - Right A: GPIO 23
 - Right B: GPIO 22
 
+IMU (BNO055, I2C) — see section 12 for full details
+- SDA: GPIO 21
+- SCL: GPIO 19 (moved off the ESP32 default GPIO22, which is already used by Right encoder B)
+
 BTS7960 (current code uses LEDC PWM channels)
 - Left forward (A):  PWM pin GPIO 25  (LEDC channel 0)
 - Left backward (B): PWM pin GPIO 26  (LEDC channel 1)
@@ -193,7 +197,76 @@ Or adapt `test_send_loop.py` in your ROS package to continuously send frames for
 - `rpm_physical_max`: measure by sending PWM 255 and reading the encoder RPM printed by the ESP32 (or logging encoder counts). That value is the motor's free-run RPM with your current gearbox and load.
 - `rpm_max` (in ROS node): set to the maximum wheel RPM you want to allow (safety limit). Typically set `rpm_max` ≤ `rpm_physical_max`.
 
-11) If you want me to (choose one):
+11) IMU (BNO055) integration — feasibility and setup
+
+Có khả thi không? Có. BNO055 tự làm sensor fusion (accelerometer + gyroscope +
+magnetometer) ngay trên chip và trả về quaternion đã hiệu chỉnh, nên ESP32 chỉ
+cần đọc qua I2C và chuyển tiếp — không cần chạy thuật toán fusion (Madgwick/
+Mahony...) trên ESP32. Đây là cách nhẹ nhàng nhất để có `orientation` phục vụ
+`robot_localization`/EKF tính odometry (kết hợp với odometry bánh xe từ
+encoder).
+
+Kiến trúc dữ liệu:
+- Kênh điều khiển động cơ (Pi → ESP32): giữ nguyên, dùng USB Serial, frame nhị
+  phân CAN-serial như mô tả ở mục 3.
+- Kênh IMU (ESP32 → Pi): dùng UART2 (Serial2, GPIO16/17), gửi dòng văn bản ASCII
+  riêng, tách biệt hoàn toàn khỏi frame nhị phân để không bao giờ lẫn lộn hai
+  luồng dữ liệu trên cùng một cổng.
+
+Wiring BNO055 (I2C)
+- VCC: 3.3V (board BNO055 thường chấp nhận 3.3V hoặc 5V, kiểm tra module cụ thể)
+- GND: GND
+- SDA: GPIO 21
+- SCL: GPIO 19
+- Lưu ý: GPIO22 (chân SCL mặc định của ESP32) đã bị chiếm bởi encoder phải
+  (ENC_RIGHT_FRONT_B), nên I2C được remap sang GPIO19 bằng `Wire.begin(21, 19)`
+  trong `setup()`. Nếu đổi chân encoder thì có thể đổi lại I2C về mặc định.
+- Địa chỉ I2C mặc định BNO055 là 0x28 (chân ADR nối GND). Nếu ADR nối 3.3V thì
+  địa chỉ là 0x29 — khi đó sửa `BNO055_ADDRESS_A` thành `BNO055_ADDRESS_B`
+  trong `main.cpp`.
+- Đặt IMU cách xa động cơ/dây dẫn công suất lớn (BTS7960, dây động cơ) vì
+  nhiễu từ trường có thể ảnh hưởng magnetometer → làm trôi hướng (heading).
+
+Frame gửi lên Pi (ASCII, kết thúc bằng `\n`), tần suất ~50Hz (mỗi 20ms):
+```
+IMU,qw,qx,qy,qz,gx,gy,gz,ax,ay,az,cal_sys,cal_gyro,cal_accel,cal_mag
+```
+- `qw,qx,qy,qz`: quaternion orientation (đã fusion sẵn)
+- `gx,gy,gz`: vận tốc góc (rad/s)
+- `ax,ay,az`: gia tốc dài, đã trừ trọng lực (m/s²)
+- `cal_sys,cal_gyro,cal_accel,cal_mag`: trạng thái hiệu chuẩn 0-3 (3 = đã hiệu
+  chuẩn đầy đủ). Nên kiểm tra 4 giá trị này = 3 trước khi tin dữ liệu orientation.
+
+Build/flash: thư viện `Adafruit BNO055` + `Adafruit Unified Sensor` đã được
+thêm vào `platformio.ini` (`lib_deps`), PlatformIO sẽ tự tải khi build.
+
+Phía ROS2: node `a3_driver/scripts/imu_serial_node.py` mở cổng UART2 (mặc định
+tham số `serial_port` là `/dev/ttyAMA0` — đổi theo cổng UART thật của Raspberry
+Pi bạn dùng để nối với GPIO16/17 của ESP32), parse dòng `IMU,...` và publish
+`sensor_msgs/Imu` trên topic `/imu/data`.
+
+Chạy thử:
+```bash
+ros2 run a3_driver imu_serial_node.py --ros-args -p serial_port:=/dev/ttyAMA0
+ros2 topic echo /imu/data
+```
+
+Kiểm tra hiệu chuẩn (calibration): BNO055 cần được "học" hiệu chuẩn mỗi lần
+mất nguồn hoàn toàn (offset không lưu tự động trừ khi bạn tự đọc/ghi lại offset
+qua `bno.getSensorOffsets()`/`setSensorOffsets()` — chưa làm trong bản này).
+Để hiệu chuẩn nhanh: xoay robot chậm quanh cả 3 trục vài vòng (gyro),
+để yên vài giây ở nhiều tư thế khác nhau (accel), và xoay hình số 8 trong
+không khí (magnetometer) cho đến khi node log không còn cảnh báo
+"Calibration ... (3=full)".
+
+Việc còn lại để có odometry hoàn chỉnh (chưa nằm trong yêu cầu hiện tại):
+- Chạy `robot_localization` (hoặc tương tự) với 2 nguồn: `/imu/data` (orientation
+  + angular velocity) và odometry tính từ encoder bánh xe, fusion ra `/odom`.
+- Căn chỉnh trục IMU khớp với khung `base_link` của robot (IMU có thể lắp lệch
+  hướng vật lý so với "trước" của robot — cần bù bằng `static_transform_publisher`
+  hoặc offset quaternion trong code nếu lắp lệch).
+
+12) If you want me to (choose one):
 - Add `rpm_physical_max` param and change mapping to clip by `rpm_max` but calculate pwm using `rpm_physical_max` (recommended for more accurate mapping).
 - Create a calibration routine that sends PWM=255, reads RPM back from ESP32 and writes `rpm_physical_max` to a param or file.
 - Archive or remove old unused CAN/Ctrl files so the repo is smaller (I can create a branch and move them into an `archive/` folder).
