@@ -1,0 +1,24 @@
+# PlatformIO
+.pio/
+.pioenvs/
+/.vscode/
+/.idea/
+
+# Build outputs
+build/
+libdeps/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Misc
+*.log
+*.bin
+*.elf
+
+# PlatformIO monitor
+platformio.ini.user
