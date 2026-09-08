@@ -31,9 +31,8 @@ install(DIRECTORY scripts msg
 )
 
 install(PROGRAMS
-  scripts/ros_serial_bridge.py
+  scripts/serial_bridge_node.py
   scripts/kinematic.py
-  scripts/imu_serial_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

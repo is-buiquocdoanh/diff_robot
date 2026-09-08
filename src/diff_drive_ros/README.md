@@ -1,167 +1,202 @@
-diff_drive_ros — ESP32 differential-drive controller (BTS7960 / L298N)
+# diff_drive_ros — ESP32 Differential-Drive Controller (BTS7960 / L298N)
 
-This repository contains ESP32 firmware and helper code used to run a two-wheel differential robot with motor drivers such as the BTS7960 (H-bridge) or L298N. It also explains how the ROS2 side (`kinematic_serial.py`) sends commands to the ESP32 using a small CAN-like serial frame.
+Firmware ESP32 + code hỗ trợ để điều khiển robot 2 bánh vi sai, dùng driver
+động cơ BTS7960 (H-bridge) hoặc L298N. Tài liệu này cũng mô tả cách phía ROS2
+(`kinematic.py` + `serial_bridge_node.py`) gửi lệnh xuống ESP32 và nhận dữ
+liệu IMU ngược lại, tất cả qua **1 cổng USB** dùng chung.
 
-This README explains:
-- board pinouts and wiring for BTS7960 and L298N
-- serial protocol and data flow between ROS2 and ESP32
-- how to build/flash and how to test
-- useful parameters, safety and calibration notes
-- ASCII debug commands available on the ESP32
+## Mục lục
+
+1. [Sơ đồ chân (pinout)](#1-sơ-đồ-chân-pinout)
+2. [Đấu dây](#2-đấu-dây)
+3. [Giao thức frame Serial/CAN](#3-giao-thức-frame-serialcan)
+4. [Luồng dữ liệu](#4-luồng-dữ-liệu)
+5. [Console debug ASCII](#5-console-debug-ascii)
+6. [Build / flash / monitor](#6-build--flash--monitor)
+7. [Phía ROS2: `kinematic.py` + `serial_bridge_node.py`](#7-phía-ros2-kinematicpy--serial_bridge_nodepy)
+8. [Test gửi frame thủ công (Python)](#8-test-gửi-frame-thủ-công-python)
+9. [An toàn & xử lý sự cố](#9-an-toàn--xử-lý-sự-cố)
+10. [Hiệu chuẩn `rpm_physical_max` / `rpm_max`](#10-hiệu-chuẩn-rpm_physical_max--rpm_max)
+11. [Tích hợp IMU (BNO055)](#11-tích-hợp-imu-bno055)
 
 ---
 
-1) Pin mappings used in the firmware (defaults)
+## 1. Sơ đồ chân (pinout)
 
-These pin assignments come from `src/main_bts7960_test.cpp` and `main.cpp` (legacy). If you changed pins in the code, use the code mapping.
+Các chân dưới đây lấy từ `src/main_bts7960_test.cpp` (và `main.cpp` — bản cũ).
+Nếu bạn đổi chân trong code, code là nguồn chính xác nhất.
 
-Encoders (quadrature)
-- Left  A: GPIO 4
-- Left  B: GPIO 15
-- Right A: GPIO 23
-- Right B: GPIO 22
+**Encoder (quadrature)**
 
-IMU (BNO055, I2C) — see section 12 for full details
-- SDA: GPIO 21
-- SCL: GPIO 19 (moved off the ESP32 default GPIO22, which is already used by Right encoder B)
+| Encoder | Pin |
+|---|---|
+| Left A | GPIO 4 |
+| Left B | GPIO 15 |
+| Right A | GPIO 23 |
+| Right B | GPIO 22 |
 
-BTS7960 (current code uses LEDC PWM channels)
-- Left forward (A):  PWM pin GPIO 25  (LEDC channel 0)
-- Left backward (B): PWM pin GPIO 26  (LEDC channel 1)
-- Right forward (A): PWM pin GPIO 32  (LEDC channel 2)
-- Right backward (B): PWM pin GPIO 33  (LEDC channel 3)
+**IMU (BNO055, I2C)** — chi tiết đầy đủ ở [mục 11](#11-tích-hợp-imu-bno055)
 
-Connect BTS7960
-- VCC/ GND: 5V/GND
+| I2C | Pin |
+|---|---|
+| SDA | GPIO 21 |
+| SCL | GPIO 19 (dời khỏi GPIO 22 mặc định vì đã dùng cho Right encoder B) |
+
+**BTS7960** (dùng LEDC PWM)
+
+| Tín hiệu | Pin | LEDC channel |
+|---|---|---|
+| Left forward (A) | GPIO 25 | 0 |
+| Left backward (B) | GPIO 26 | 1 |
+| Right forward (A) | GPIO 32 | 2 |
+| Right backward (B) | GPIO 33 | 3 |
+
+Đấu nối BTS7960:
+- VCC/GND: 5V/GND
 - R_IS/L_IS: bỏ qua
 - R_EN/L_EN: 3.3V/3.3V
-- R_PMW/L_PMW: pin 25/26 (đọng cơ trái)
-- R_PMW/L_PMW: pin 32/33 (động cơ phải)
+- Động cơ trái → R_PWM/L_PWM = GPIO 25/26
+- Động cơ phải → R_PWM/L_PWM = GPIO 32/33
 
-Serial ports
-- USB (Serial) — used for debug/ASCII console and can also receive binary CAN-serial frames
-- UART2 (Serial2) — default pins RX=16, TX=17 (used for a Raspberry Pi / external controller)
+**Serial**
 
-Notes: LEDC channel numbers are set up in code; the driver functions call ledcWrite(channel, duty) where duty is 0..255 (8-bit resolution).
+| Cổng | Vai trò |
+|---|---|
+| USB (`Serial`) | Kênh chính: nhận frame nhị phân lệnh động cơ, gửi dòng debug + IMU (`IMU,...`), console ASCII |
+| UART2 (`Serial2`) | Mặc định RX=16, TX=17 — cổng nhận lệnh động cơ dự phòng, không bắt buộc nếu chỉ dùng 1 cổng USB |
 
-2) Wiring guidance
+> LEDC channel được cấu hình sẵn trong code; `ledcWrite(channel, duty)` nhận
+> duty 0..255 (độ phân giải 8-bit).
 
-BTS7960 wiring (recommended)
-- BTS7960 has two control inputs per motor: RPWM and LPWM (or similar named). Each input is driven by a PWM signal; to move forward you enable one side, to reverse you drive the other side.
-- Power lines:
-  - Connect motor power supply (VM) to BTS7960 VM (check driver voltage and motor rating).
-  - Connect BTS7960 GND to ESP32 GND and to motor battery negative.
-- Control lines (example mapping to the firmware pins above):
-  - Left motor RPWM <- GPIO 25 (L_PWM_PIN_A)
-  - Left motor LPWM <- GPIO 26 (L_PWM_PIN_B)
-  - Right motor RPWM <- GPIO 32 (R_PWM_PIN_A)
-  - Right motor LPWM <- GPIO 33 (R_PWM_PIN_B)
-- Enable pins and current sensing on BTS7960: connect as needed, set jumpers per module doc. Ensure grounds are common.
-- Encoders: connect the encoder A/B signals to the ESP32 encoder pins and enable pull-ups (firmware sets INPUT_PULLUP). If encoder outputs are open-collector, pull-ups are required.
+## 2. Đấu dây
 
-L298N wiring (alternative)
-- L298N typically expects two direction pins and one enable (PWM) per motor or combinations of IN1/IN2 + ENA.
-- Example mapping (adapt in firmware if you use L298N):
-  - Left IN1 <- GPIO X (digital)
-  - Left IN2 <- GPIO Y (digital)
-  - Left ENA <- GPIO Z (PWM)
-  - Right IN3 <- GPIO A (digital)
-  - Right IN4 <- GPIO B (digital)
-  - Right ENB <- GPIO C (PWM)
-- Note: L298N drops more voltage and dissipates heat; choose driver based on motor current.
-- If you use L298N, you must adapt `set_bts7960_pwm()` in the firmware to drive the direction pins and PWM on the enable pin.
+**BTS7960 (khuyến nghị)**
 
-3) Serial/CAN-serial frame format (used between ROS and ESP32)
+- Mỗi động cơ có 2 chân điều khiển RPWM/LPWM: bật một bên để tiến, bên còn lại để lùi.
+- Nguồn: VM động cơ → BTS7960 VM (kiểm tra điện áp/dòng của driver và động cơ); GND BTS7960 → GND ESP32 và cực âm pin động cơ.
+- Điều khiển (theo pinout ở trên): Left RPWM←GPIO25, Left LPWM←GPIO26, Right RPWM←GPIO32, Right LPWM←GPIO33.
+- Enable pin / current sensing: đấu theo tài liệu module, đảm bảo GND chung.
+- Encoder: nối A/B vào chân encoder ESP32, bật pull-up (firmware đã set `INPUT_PULLUP`) — bắt buộc nếu encoder dạng open-collector.
 
-We use a very small custom framing protocol to send command frames (this is *not* real CAN on the bus—only a frame format):
+**L298N (phương án thay thế)**
 
-Frame layout (14 bytes total):
-- Header: 0x2A (1 byte)
-- ID   : 4 bytes (little-endian) — a 32-bit packet id (unused except for debug)
-- Data : 8 bytes — data[0] .. data[7]
-- Tail : 0x23 (1 byte)
+- Thường cần 2 chân direction + 1 chân enable (PWM) mỗi động cơ (IN1/IN2 + ENA...).
+- Ví dụ mapping (tự chọn chân, sửa lại trong firmware):
+  - Left: IN1←GPIO X, IN2←GPIO Y, ENA←GPIO Z (PWM)
+  - Right: IN3←GPIO A, IN4←GPIO B, ENB←GPIO C (PWM)
+- L298N sụt áp nhiều hơn và tỏa nhiệt hơn — chọn driver theo dòng điện động cơ.
+- Nếu dùng L298N, cần sửa `set_bts7960_pwm()` trong firmware để điều khiển chân direction + PWM enable.
 
-Our convention for motor control data layout (current firmware):
-- data[0] = left_dir   (0=stop, 1=forward, 2=backward)
-- data[1] = left_pwm   (0..255)
-- data[2] = right_dir  (0=stop,1=forward,2=backward)
-- data[3] = right_pwm  (0..255)
-- data[4..7] = reserved (0)
+## 3. Giao thức frame Serial/CAN
 
-This packet can be sent on either USB serial (Serial) or UART2 (Serial2). The ESP32 code attempts to read packets from either port.
+Frame nhị phân tự định nghĩa (không phải CAN bus thật, chỉ mượn cấu trúc), tổng
+**14 byte**:
 
-4) Data flow overview (ROS -> ESP32 -> motors / sensors -> ROS)
+| Header | ID | Data | Tail |
+|---|---|---|---|
+| `0x2A` (1 byte) | 4 byte, little-endian (packet id, chỉ dùng debug) | 8 byte | `0x23` (1 byte) |
 
-- ROS2 node `kinematic_serial.py` subscribes to `/cmd_vel`.
-- It computes wheel target RPM using differential-drive kinematics, clips to `rpm_max` (parameter), maps RPM → PWM (0..255), builds the CAN-serial frame above and writes it to the configured serial port (USB or /dev/ttyUSBx).
-- ESP32 (`main_bts7960_test.cpp`) reads the binary packet, extracts dir/pwm values and calls `set_bts7960_pwm()` which sets LEDC PWM channels accordingly.
-- Encoder counts are read on the ESP32 using PCNT (pulse counter) and printed to Serial periodically for debugging (firmware prints RPM estimates). The ROS side can also request encoder frames if implemented.
+Layout `data[0..7]` cho điều khiển động cơ:
 
-5) ASCII debug console (USB Serial)
+| Byte | Ý nghĩa |
+|---|---|
+| `data[0]` | left_dir (0=stop, 1=forward, 2=backward) |
+| `data[1]` | left_pwm (0..255) |
+| `data[2]` | right_dir (0=stop, 1=forward, 2=backward) |
+| `data[3]` | right_pwm (0..255) |
+| `data[4..7]` | reserved (0) |
 
-When connected to USB Serial (monitor) you can send simple ASCII commands. The firmware reads them when there is no binary packet received:
-- L <pwm> <dir>   — set left motor (e.g. "L 150 1")
-- R <pwm> <dir>   — set right motor
-- S               — stop both motors
-- D               — prints debug information (pin states, duty)
+Frame có thể gửi qua USB Serial hoặc UART2 — ESP32 đọc song song cả hai cổng.
 
-The firmware now uses a fixed buffer (no Arduino String usage) and a safety timeout so the serial console won't crash the parser.
+## 4. Luồng dữ liệu
 
-6) Build / flash / monitor
+```
+ROS2 (/cmd_vel) → kinematic.py → /vel_query → serial_bridge_node.py → frame CAN-serial ┐
+                                                                                        ▼
+                                                                    USB Serial (1 cổng, 2 chiều)
+                                                                                        │
+                          ESP32 (main.cpp): BTS7960 ← lệnh động cơ  ◄──────────────────┘
+                                            PCNT đọc encoder → log RPM (debug)
+                                            BNO055 → dòng "IMU,..." ─────────────────┐
+                                                                                      ▼
+                                                          serial_bridge_node.py → /imu/data
+```
 
-From the `diff_drive_ros` folder (PlatformIO):
+1. `kinematic.py` subscribe `/cmd_vel`, tính RPM mục tiêu mỗi bánh theo động học vi sai, clip theo `rpm_max`, map RPM → PWM (0..255), publish `Velquery`.
+2. `serial_bridge_node.py` subscribe `Velquery`, đóng gói frame ở [mục 3](#3-giao-thức-frame-serialcan) rồi ghi xuống ESP32 qua **cùng 1 cổng USB**; đồng thời đọc mọi dòng text ESP32 gửi lên trên cổng đó, dòng nào bắt đầu bằng `IMU,` thì parse và publish `sensor_msgs/Imu` trên `/imu/data` (các dòng debug khác bị bỏ qua). Xem chi tiết ở [mục 7](#7-phía-ros2-kinematicpy--serial_bridge_nodepy) và [mục 11](#11-tích-hợp-imu-bno055).
+3. `main.cpp` đọc packet nhị phân, tách dir/pwm, gọi `set_bts7960_pwm()` để set các kênh LEDC; đồng thời stream dòng IMU ra cùng cổng ở nhịp ~50 Hz.
+4. Encoder được đọc bằng PCNT (pulse counter), in định kỳ ra Serial để debug (ước lượng RPM) — dữ liệu debug này không được ROS đọc lại, chỉ để xem qua `platformio device monitor`.
 
-Build:
+> Vì cả điều khiển động cơ và IMU dùng chung 1 cổng, **chỉ được có duy nhất 1
+> process mở cổng serial này** (`serial_bridge_node.py`) — hai process cùng mở
+> một device sẽ khiến byte đọc về bị chia ngẫu nhiên và hỏng cả hai luồng.
+
+## 5. Console debug ASCII (USB Serial)
+
+Khi mở monitor USB Serial, có thể gửi lệnh ASCII (firmware đọc khi không có packet nhị phân):
+
+| Lệnh | Ý nghĩa |
+|---|---|
+| `L <pwm> <dir>` | set động cơ trái, vd `L 150 1` |
+| `R <pwm> <dir>` | set động cơ phải |
+| `S` | dừng cả hai động cơ |
+| `D` | in thông tin debug (trạng thái chân, duty) |
+
+Firmware dùng buffer cố định (không dùng Arduino `String`) và có timeout an toàn để parser không bị treo.
+
+## 6. Build / flash / monitor
+
+Chạy trong thư mục `diff_drive_ros` (PlatformIO):
 
 ```bash
+# Build
 platformio run
-```
 
-Upload (auto detects upload_port from platformio.ini or set via env):
-
-```bash
+# Upload (tự nhận upload_port từ platformio.ini, hoặc set qua env)
 platformio run --target upload
-```
 
-Monitor serial output (USB):
-
-```bash
+# Monitor
 platformio device monitor
-# or specify port
-platformio device monitor --port /dev/ttyUSB0
+platformio device monitor --port /dev/ttyUSB0   # hoặc chỉ định cổng
 ```
 
-7) ROS side: `kinematic_serial.py` (quick usage)
+## 7. Phía ROS2: `kinematic.py` + `serial_bridge_node.py`
 
-- The ROS node is in your ROS package (path in your workspace). It has parameters:
-  - `serial_port` (default: `/dev/ttyUSB0` or `/dev/ttyUSB1` depending on your system)
-  - `baudrate` (default 115200)
-  - `rate` (send rate, default 20 Hz)
-  - `rpm_max` (the maximum wheel RPM the node will command — default configurable)
-  - `log_rate` (how often to log PWM values)
-  - `deadband_*`, `stop_timeout`, `min_pwm_threshold` for safety
+Hai node phối hợp qua topic nội bộ `/vel_query` (msg `Velquery`):
 
-Start node (example):
+**`kinematic.py`** — subscribe `/cmd_vel`, tính động học vi sai, publish `Velquery`.
+
+| Tham số | Ý nghĩa |
+|---|---|
+| `rate` | tần suất publish, mặc định 100 Hz |
+| `rpm_max` | RPM tối đa được phép gửi |
+| `deadband_*`, `stop_timeout`, `min_pwm_threshold`... | các tham số an toàn (xem code để biết danh sách đầy đủ) |
+
+**`serial_bridge_node.py`** — node duy nhất mở cổng serial: ghi frame lệnh động cơ xuống ESP32 và đọc dòng `IMU,...` từ ESP32 để publish `/imu/data`.
+
+| Tham số | Ý nghĩa |
+|---|---|
+| `serial_port` | mặc định `/dev/esp32` (khuyến nghị tạo udev symlink cố định thay vì `/dev/ttyUSBx` hay đổi số) |
+| `baudrate` | mặc định 115200 |
+| `reconnect_interval` | giây giữa các lần thử kết nối lại khi mất cổng, mặc định 1.5 |
+| `imu_frame_id` | frame_id gắn vào `sensor_msgs/Imu`, mặc định `imu_link` |
+| `orientation_stddev`, `angular_velocity_stddev`, `linear_acceleration_stddev` | độ lệch chuẩn dùng để điền covariance cho `/imu/data` |
+
+Chạy:
 
 ```bash
-ros2 run robot_control kinematic_serial
+ros2 run a3_driver kinematic.py
+ros2 run a3_driver serial_bridge_node.py --ros-args -p serial_port:=/dev/esp32
 ```
 
-Or run directly with Python (if not installed as a package):
-
-```bash
-python3 /path/to/kinematic_serial.py
-```
-
-Publish a velocity to test:
+Test gửi vận tốc và xem IMU:
 
 ```bash
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.1}, angular: {z: 0.0}}" -r 5
+ros2 topic echo /imu/data
 ```
 
-8) Quick serial test (Python) — send a single frame
-
-If you want to test sending a frame manually, you can use a small Python snippet that writes the 14-byte frame via pyserial:
+## 8. Test gửi frame thủ công (Python)
 
 ```python
 import serial, struct
@@ -178,104 +213,82 @@ ser.write(header + pid + bytes(data) + tail)
 ser.close()
 ```
 
-Or adapt `test_send_loop.py` in your ROS package to continuously send frames for testing.
+Có thể dùng/sửa `test_send_loop.py` để gửi liên tục phục vụ test.
 
-9) Safety & Troubleshooting
+## 9. An toàn & xử lý sự cố
 
-- Stalling / "stops accepting commands":
-  - We added a PACKET_TIMEOUT on the ESP32: if no binary packet arrives within the timeout, firmware will stop the motors and print a safety message. This prevents runaway when the ROS node crashes.
-  - The firmware also has a watchdog-style heartbeat and uses a non-blocking packet parser — this reduces the chances the serial parser gets stuck on garbage.
-- Encoder issues:
-  - If an encoder channel reads zero while the motor spins, check wiring and pull-ups. The firmware sets internal pull-ups; if your encoder is open-collector you must have pull-ups.
-  - PCNT filter: if pulses are too short or noisy, adjust `pcnt_set_filter_value(...)` in the firmware.
-- PWM drift (motors turning slowly when joystick released):
-  - Use `deadband_linear`, `deadband_angular` and `min_pwm_threshold` params on the ROS node to prevent sending very small PWM values.
-- Memory: avoid Arduino `String` in embedded code (firmware has been updated to use fixed buffers). If you see heap fragmentation you can print `ESP.getFreeHeap()` (firmware already logs free heap occasionally).
+**Robot ngừng nhận lệnh / "đứng hình"**
+- Firmware có `PACKET_TIMEOUT`: nếu không nhận packet nhị phân trong thời gian timeout, motor tự dừng và in cảnh báo — tránh chạy loạn khi node ROS crash.
+- Có cơ chế heartbeat kiểu watchdog và parser non-blocking để tránh kẹt khi nhận dữ liệu rác.
 
-10) Calibration: measuring `rpm_physical_max` and setting `rpm_max`
+**Encoder lỗi**
+- Nếu một kênh encoder đọc về 0 dù động cơ vẫn quay, kiểm tra dây và pull-up. Firmware đã bật pull-up nội bộ; nếu encoder dạng open-collector bắt buộc phải có pull-up ngoài.
+- Nếu xung quá ngắn/nhiễu, chỉnh `pcnt_set_filter_value(...)` trong firmware.
 
-- `rpm_physical_max`: measure by sending PWM 255 and reading the encoder RPM printed by the ESP32 (or logging encoder counts). That value is the motor's free-run RPM with your current gearbox and load.
-- `rpm_max` (in ROS node): set to the maximum wheel RPM you want to allow (safety limit). Typically set `rpm_max` ≤ `rpm_physical_max`.
+**PWM trôi (động cơ vẫn quay chậm khi thả joystick)**
+- Dùng `deadband_linear`, `deadband_angular`, `min_pwm_threshold` ở phía ROS để tránh gửi giá trị PWM quá nhỏ.
 
-11) IMU (BNO055) integration — feasibility and setup
+**Bộ nhớ**
+- Tránh dùng Arduino `String` trong code nhúng (firmware đã chuyển sang buffer cố định). Có thể theo dõi `ESP.getFreeHeap()` nếu nghi ngờ phân mảnh heap (firmware đã log định kỳ).
 
-Có khả thi không? Có. BNO055 tự làm sensor fusion (accelerometer + gyroscope +
-magnetometer) ngay trên chip và trả về quaternion đã hiệu chỉnh, nên ESP32 chỉ
-cần đọc qua I2C và chuyển tiếp — không cần chạy thuật toán fusion (Madgwick/
-Mahony...) trên ESP32. Đây là cách nhẹ nhàng nhất để có `orientation` phục vụ
-`robot_localization`/EKF tính odometry (kết hợp với odometry bánh xe từ
-encoder).
+## 10. Hiệu chuẩn `rpm_physical_max` / `rpm_max`
 
-Kiến trúc dữ liệu:
-- Kênh điều khiển động cơ (Pi → ESP32): giữ nguyên, dùng USB Serial, frame nhị
-  phân CAN-serial như mô tả ở mục 3.
-- Kênh IMU (ESP32 → Pi): dùng UART2 (Serial2, GPIO16/17), gửi dòng văn bản ASCII
-  riêng, tách biệt hoàn toàn khỏi frame nhị phân để không bao giờ lẫn lộn hai
-  luồng dữ liệu trên cùng một cổng.
+- `rpm_physical_max`: đo bằng cách set PWM=255 và đọc RPM từ log encoder trên ESP32 — đây là RPM chạy không tải thực tế với hộp số/tải hiện tại.
+- `rpm_max` (tham số ROS): giới hạn an toàn RPM tối đa cho phép, nên đặt `rpm_max` ≤ `rpm_physical_max`.
 
-Wiring BNO055 (I2C)
-- VCC: 3.3V (board BNO055 thường chấp nhận 3.3V hoặc 5V, kiểm tra module cụ thể)
-- GND: GND
-- SDA: GPIO 21
-- SCL: GPIO 19
-- Lưu ý: GPIO22 (chân SCL mặc định của ESP32) đã bị chiếm bởi encoder phải
-  (ENC_RIGHT_FRONT_B), nên I2C được remap sang GPIO19 bằng `Wire.begin(21, 19)`
-  trong `setup()`. Nếu đổi chân encoder thì có thể đổi lại I2C về mặc định.
-- Địa chỉ I2C mặc định BNO055 là 0x28 (chân ADR nối GND). Nếu ADR nối 3.3V thì
-  địa chỉ là 0x29 — khi đó sửa `BNO055_ADDRESS_A` thành `BNO055_ADDRESS_B`
-  trong `main.cpp`.
-- Đặt IMU cách xa động cơ/dây dẫn công suất lớn (BTS7960, dây động cơ) vì
-  nhiễu từ trường có thể ảnh hưởng magnetometer → làm trôi hướng (heading).
+## 11. Tích hợp IMU (BNO055)
 
-Frame gửi lên Pi (ASCII, kết thúc bằng `\n`), tần suất ~50Hz (mỗi 20ms):
+BNO055 tự làm sensor fusion (accelerometer + gyroscope + magnetometer) ngay
+trên chip và trả về quaternion đã hiệu chỉnh, nên ESP32 chỉ cần đọc qua I2C và
+forward — không cần chạy thuật toán fusion (Madgwick/Mahony...) trên ESP32.
+Đây là cách nhẹ nhàng nhất để có `orientation` phục vụ `robot_localization`/EKF
+tính odometry (kết hợp với odometry bánh xe từ encoder).
+
+**Kiến trúc dữ liệu**
+- Kênh điều khiển động cơ (Pi → ESP32): USB Serial, frame nhị phân CAN-serial ([mục 3](#3-giao-thức-frame-serialcan)).
+- Kênh IMU (ESP32 → Pi): dùng **cùng cổng USB Serial**, gửi dòng văn bản ASCII riêng biệt (`IMU,...\n`). Hai chiều không lẫn nhau vì Pi → ESP32 luôn là nhị phân, còn ESP32 → Pi luôn là text theo dòng — phía Pi chỉ cần lọc dòng bắt đầu bằng `IMU,`, các dòng debug khác của ESP32 bị bỏ qua.
+- UART2 (Serial2, GPIO16/17) trên ESP32 vẫn còn trong code như một cổng nhận lệnh động cơ dự phòng, nhưng không dùng cho IMU nữa và không bắt buộc phải đấu dây nếu chỉ dùng 1 cổng USB.
+
+**Đấu dây BNO055 (I2C)**
+
+| Chân | Nối tới |
+|---|---|
+| VCC | 3.3V (kiểm tra module cụ thể, một số hỗ trợ cả 5V) |
+| GND | GND |
+| SDA | GPIO 21 |
+| SCL | GPIO 19 |
+
+- GPIO22 (chân SCL mặc định của ESP32) đã bị chiếm bởi encoder phải (`ENC_RIGHT_FRONT_B`), nên I2C được remap sang GPIO19 bằng `Wire.begin(21, 19)` trong `setup()`. Nếu đổi chân encoder, có thể trả I2C về mặc định.
+- Địa chỉ I2C mặc định là `0x28` (chân ADR nối GND). Nếu ADR nối 3.3V thì địa chỉ là `0x29` — sửa `BNO055_ADDRESS_A` thành `BNO055_ADDRESS_B` trong `main.cpp`.
+- Đặt IMU cách xa động cơ/dây công suất lớn (BTS7960, dây động cơ) vì nhiễu từ trường có thể làm trôi hướng (heading) đọc từ magnetometer.
+
+**Frame gửi lên Pi** (ASCII, kết thúc `\n`, tần suất ~50 Hz / 20 ms):
+
 ```
 IMU,qw,qx,qy,qz,gx,gy,gz,ax,ay,az,cal_sys,cal_gyro,cal_accel,cal_mag
 ```
-- `qw,qx,qy,qz`: quaternion orientation (đã fusion sẵn)
-- `gx,gy,gz`: vận tốc góc (rad/s)
-- `ax,ay,az`: gia tốc dài, đã trừ trọng lực (m/s²)
-- `cal_sys,cal_gyro,cal_accel,cal_mag`: trạng thái hiệu chuẩn 0-3 (3 = đã hiệu
-  chuẩn đầy đủ). Nên kiểm tra 4 giá trị này = 3 trước khi tin dữ liệu orientation.
+
+| Trường | Ý nghĩa |
+|---|---|
+| `qw,qx,qy,qz` | quaternion orientation (đã fusion sẵn) |
+| `gx,gy,gz` | vận tốc góc (rad/s) |
+| `ax,ay,az` | gia tốc dài, đã trừ trọng lực (m/s²) |
+| `cal_sys,cal_gyro,cal_accel,cal_mag` | trạng thái hiệu chuẩn 0-3 (3 = đầy đủ) — nên kiểm tra cả 4 giá trị = 3 trước khi tin dữ liệu orientation |
 
 Build/flash: thư viện `Adafruit BNO055` + `Adafruit Unified Sensor` đã được
-thêm vào `platformio.ini` (`lib_deps`), PlatformIO sẽ tự tải khi build.
+thêm vào `platformio.ini` (`lib_deps`), PlatformIO tự tải khi build.
 
-Phía ROS2: node `a3_driver/scripts/imu_serial_node.py` mở cổng UART2 (mặc định
-tham số `serial_port` là `/dev/ttyAMA0` — đổi theo cổng UART thật của Raspberry
-Pi bạn dùng để nối với GPIO16/17 của ESP32), parse dòng `IMU,...` và publish
-`sensor_msgs/Imu` trên topic `/imu/data`.
+Phía ROS2: `serial_bridge_node.py` (cùng node ghi lệnh động cơ) đọc dòng
+`IMU,...` trên cổng USB và publish `sensor_msgs/Imu` trên `/imu/data` — xem
+tham số và cách chạy ở [mục 7](#7-phía-ros2-kinematicpy--serial_bridge_nodepy).
 
-Chạy thử:
-```bash
-ros2 run a3_driver imu_serial_node.py --ros-args -p serial_port:=/dev/ttyAMA0
-ros2 topic echo /imu/data
-```
+**Hiệu chuẩn (calibration)**: BNO055 cần "học" lại hiệu chuẩn mỗi lần mất
+nguồn hoàn toàn (offset không tự lưu, trừ khi tự đọc/ghi qua
+`bno.getSensorOffsets()`/`setSensorOffsets()` — chưa làm trong bản này). Cách
+hiệu chuẩn nhanh: xoay robot chậm quanh cả 3 trục vài vòng (gyro), để yên vài
+giây ở nhiều tư thế khác nhau (accel), xoay hình số 8 trong không khí
+(magnetometer) — cho đến khi node không còn cảnh báo "Calibration ... (3=full)".
 
-Kiểm tra hiệu chuẩn (calibration): BNO055 cần được "học" hiệu chuẩn mỗi lần
-mất nguồn hoàn toàn (offset không lưu tự động trừ khi bạn tự đọc/ghi lại offset
-qua `bno.getSensorOffsets()`/`setSensorOffsets()` — chưa làm trong bản này).
-Để hiệu chuẩn nhanh: xoay robot chậm quanh cả 3 trục vài vòng (gyro),
-để yên vài giây ở nhiều tư thế khác nhau (accel), và xoay hình số 8 trong
-không khí (magnetometer) cho đến khi node log không còn cảnh báo
-"Calibration ... (3=full)".
-
-Việc còn lại để có odometry hoàn chỉnh (chưa nằm trong yêu cầu hiện tại):
-- Chạy `robot_localization` (hoặc tương tự) với 2 nguồn: `/imu/data` (orientation
-  + angular velocity) và odometry tính từ encoder bánh xe, fusion ra `/odom`.
-- Căn chỉnh trục IMU khớp với khung `base_link` của robot (IMU có thể lắp lệch
-  hướng vật lý so với "trước" của robot — cần bù bằng `static_transform_publisher`
-  hoặc offset quaternion trong code nếu lắp lệch).
-
-12) If you want me to (choose one):
-- Add `rpm_physical_max` param and change mapping to clip by `rpm_max` but calculate pwm using `rpm_physical_max` (recommended for more accurate mapping).
-- Create a calibration routine that sends PWM=255, reads RPM back from ESP32 and writes `rpm_physical_max` to a param or file.
-- Archive or remove old unused CAN/Ctrl files so the repo is smaller (I can create a branch and move them into an `archive/` folder).
-
----
-
-If you want, I can now:
-- add a short calibration routine to `kinematic_serial.py`, or
-- add a `README` entry describing exact commands to measure `rpm_physical_max` using your current firmware logs, or
-- create a small convenience script to perform the calibration automatically.
-
-Which would you like next?
+**Việc còn lại để có odometry hoàn chỉnh** (chưa nằm trong scope hiện tại):
+- Chạy `robot_localization` (hoặc tương tự) fusion `/imu/data` (orientation + angular velocity) với odometry tính từ encoder bánh xe, ra `/odom`.
+- Căn chỉnh trục IMU khớp với khung `base_link` của robot (nếu IMU lắp lệch hướng vật lý so với "trước" của robot, cần bù bằng `static_transform_publisher` hoặc offset quaternion trong code).

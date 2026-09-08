@@ -56,9 +56,10 @@ bool imuReady = false;
 const unsigned long IMU_SEND_INTERVAL = 20; // ms (~50 Hz)
 unsigned long lastImuSend = 0;
 
-// Reads the BNO055's onboard sensor fusion output and sends it to the Pi over
-// UART2 as a plain-text CSV line. Kept on Serial2 (not USB) so it never mixes
-// with the binary CAN-serial motor-command frames on Serial.
+// Reads the BNO055's onboard sensor fusion output and sends it to the Pi as a
+// plain-text CSV line over USB Serial. Motor-command frames arriving on
+// Serial are binary and line-terminated debug/IMU text never collides with
+// them since the Pi only ever reads text lines back from the ESP32.
 void sendImuData() {
   imu::Quaternion quat = bno.getQuat();
   imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);     // rad/s
@@ -67,11 +68,11 @@ void sendImuData() {
   uint8_t sys, gyroCal, accelCal, magCal;
   bno.getCalibration(&sys, &gyroCal, &accelCal, &magCal);
 
-  Serial2.printf("IMU,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u\n",
-                 quat.w(), quat.x(), quat.y(), quat.z(),
-                 gyro.x(), gyro.y(), gyro.z(),
-                 lacc.x(), lacc.y(), lacc.z(),
-                 sys, gyroCal, accelCal, magCal);
+  Serial.printf("IMU,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u\n",
+                quat.w(), quat.x(), quat.y(), quat.z(),
+                gyro.x(), gyro.y(), gyro.z(),
+                lacc.x(), lacc.y(), lacc.z(),
+                sys, gyroCal, accelCal, magCal);
 }
 
 void setupPCNT(pcnt_unit_t unit, int pinA, int pinB) {
@@ -190,11 +191,9 @@ void loop() {
   if (CSerialUSB.readPacket(pkt)) {
     got = true;
     lastPacketMillis = millis();
-    Serial.printf("[RX USB] id=0x%08x\n", pkt.id);
   } else if (CSerial2.readPacket(pkt)) {
     got = true;
     lastPacketMillis = millis();
-    Serial.printf("[RX UART2] id=0x%08x\n", pkt.id);
   }
 
   if (got) {
@@ -207,11 +206,10 @@ void loop() {
     rf_pwm = constrain(rf_pwm, 0, 255);
     set_bts7960_pwm(CH_L_A, CH_L_B, lf_pwm, lf_dir);
     set_bts7960_pwm(CH_R_A, CH_R_B, rf_pwm, rf_dir);
-    Serial.printf("[RX] CAN-Serial -> L pwm=%d dir=%d | R pwm=%d dir=%d\n", lf_pwm, lf_dir, rf_pwm, rf_dir);
   }
 
-  // Stream IMU data to the Pi over UART2 at a fixed rate, independent of
-  // motor-command traffic on Serial.
+  // Stream IMU data to the Pi over USB Serial at a fixed rate, interleaved
+  // as plain text lines with any other debug output on the same port.
   if (imuReady) {
     unsigned long nowImu = millis();
     if (nowImu - lastImuSend >= IMU_SEND_INTERVAL) {
