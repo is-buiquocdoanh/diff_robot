@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Bánh caster.
+       KHÔNG cần copy caster_wheel.STL thành 4 file: cùng một macro được gọi
+       4 lần với `prefix` khác nhau, cả 4 link đều trỏ về đúng 1 file mesh.
+
+       Gốc toạ độ của link đặt tại TÂM ĐẾ BẮT BULÔNG (trục xoay của caster),
+       nằm đúng mặt phẳng bắt vào đáy khung. -->
+  <xacro:macro name="caster_wheel" params="prefix x y">
+
+    <link name="${prefix}_caster_link">
+      <visual>
+        <origin xyz="-0.0502105 0.030005 -0.0868542" rpy="${yup_rpy}"/>
+        <geometry>
+          <mesh filename="package://a3_description/meshes/caster_wheel.STL"
+                scale="${mesh_scale}"/>
+        </geometry>
+        <material name="a3_grey"/>
+      </visual>
+
+      <!-- Va chạm: quả cầu đúng bằng bánh caster, tâm lệch `caster_trail` phía sau
+           trục xoay. Cho ma sát ~0 trong Gazebo để nó trượt tự do mọi hướng. -->
+      <collision>
+        <origin xyz="${-caster_trail} 0 ${-(caster_plate_to_ground-caster_wheel_radius)}"
+                rpy="0 0 0"/>
+        <geometry>
+          <sphere radius="${caster_wheel_radius}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="-0.013106 -0.000058 -0.025901" rpy="0 0 0"/>
+        <mass value="${caster_mass}"/>
+        <inertia ixx="${caster_mass*5.65912e-4}" ixy="${caster_mass*-6.72554e-7}" ixz="${caster_mass*-2.21726e-4}"
+                 iyy="${caster_mass*7.67405e-4}" iyz="${caster_mass*-1.04502e-6}"
+                 izz="${caster_mass*4.57431e-4}"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${prefix}_caster_link"/>
+      <origin xyz="${x} ${y} ${caster_plate_to_ground - wheel_radius}" rpy="0 0 0"/>
+    </joint>
+
+  </xacro:macro>
+</robot>

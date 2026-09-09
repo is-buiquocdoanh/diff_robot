@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- RPLidar đặt ở CHÍNH GIỮA sàn TẦNG 2, đáy vỏ tì lên mặt sàn.
+       laser_link đặt tại trục quay của đầu lidar (gốc dữ liệu quét), nằm đúng
+       trên trục dọc của xe => dữ liệu /scan đối xứng, không cần bù offset.
+       Vị trí lấy từ deck2_top_z / lidar_x / lidar_y / lidar_z trong common.xacro. -->
+  <xacro:macro name="rp_lidar" params="parent">
+
+    <link name="laser_link">
+      <visual>
+        <origin xyz="-0.13303 -0.04813 -0.76300" rpy="${cad_rpy}"/>
+        <geometry>
+          <mesh filename="package://a3_description/meshes/RP-Lidar.STL"
+                scale="${mesh_scale}"/>
+        </geometry>
+        <material name="a3_black"/>
+      </visual>
+
+      <collision>
+        <origin xyz="-0.00011 0.00269 -0.01656" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.0717 0.0975 0.0535"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0.000421 0.001899 -0.018576" rpy="0 0 0"/>
+        <mass value="${lidar_mass}"/>
+        <inertia ixx="${lidar_mass*8.41657e-4}" ixy="${lidar_mass*8.18813e-6}" ixz="${lidar_mass*-5.22246e-6}"
+                 iyy="${lidar_mass*4.33486e-4}" iyz="${lidar_mass*8.94180e-5}"
+                 izz="${lidar_mass*9.84789e-4}"/>
+      </inertial>
+    </link>
+
+    <joint name="laser_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child  link="laser_link"/>
+      <origin xyz="${lidar_x} ${lidar_y} ${lidar_z}" rpy="0 0 ${lidar_yaw}"/>
+    </joint>
+
+  </xacro:macro>
+</robot>

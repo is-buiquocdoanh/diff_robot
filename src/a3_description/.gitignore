@@ -1,0 +1,6 @@
+# Nếu thấy các thư mục này xuất hiện ở đây nghĩa là đã lỡ chạy `colcon build`
+# khi đang đứng trong thư mục package. Phải chạy từ gốc workspace:
+#     cd ~/Downloads/khungrobotSTL && colcon build --packages-select a3_description
+build/
+install/
+log/

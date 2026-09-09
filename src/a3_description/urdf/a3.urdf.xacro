@@ -1,0 +1,106 @@
+<?xml version="1.0"?>
+<!--
+  a3_description - mô tả robot A3 (differential drive, 4 bánh caster)
+
+  Hệ toạ độ:
+    base_footprint : hình chiếu của robot trên mặt đất (z = 0)
+    base_link      : gốc tại TÂM TRỤC 2 BÁNH CHỦ ĐỘNG, cao wheel_radius so với đất
+                     X: tiến, Y: trái, Z: lên  (chuẩn REP-103)
+
+  Mọi kích thước đều được đo trực tiếp từ file STL - xem urdf/common.xacro.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="a3">
+
+  <xacro:include filename="$(find a3_description)/urdf/common.xacro"/>
+  <xacro:include filename="$(find a3_description)/urdf/drive_wheel.xacro"/>
+  <xacro:include filename="$(find a3_description)/urdf/caster_wheel.xacro"/>
+  <xacro:include filename="$(find a3_description)/urdf/lidar.xacro"/>
+
+  <!-- Bật thêm thẻ Gazebo + plugin diff_drive:  xacro a3.urdf.xacro sim_gazebo:=true -->
+  <xacro:arg name="sim_gazebo" default="false"/>
+
+  <!-- 4 cột nhôm 20x20 đi xuyên khe lidar ở tầng 2 -->
+  <xacro:macro name="lidar_bay_post" params="x y">
+    <collision>
+      <origin xyz="${x} ${y} ${(deck2_top_z + 0.25760)/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 ${0.25760 - deck2_top_z}"/>
+      </geometry>
+    </collision>
+  </xacro:macro>
+
+  <!-- ===================== base_footprint ===================== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== Khung xe ===================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="-0.36703 -0.22233 -0.23303" rpy="${cad_rpy}"/>
+      <geometry>
+        <mesh filename="package://a3_description/meshes/chassis.STL"
+              scale="${mesh_scale}"/>
+      </geometry>
+      <material name="a3_grey"/>
+    </visual>
+
+    <!-- Va chạm: KHÔNG dùng một khối hộp bao duy nhất, vì hộp đó sẽ bọc kín
+         lidar và làm mọi tia quét đập vào thành hộp (lidar mù hoàn toàn).
+         Thay bằng 3 phần, chừa đúng khe lidar 80 mm ở tầng 2 trống:
+           - thân dưới : đáy khung -> mặt sàn tầng 2   (z -0.0275 .. 0.1776)
+           - 4 cột 20x20 xuyên qua khe                 (z  0.1776 .. 0.2576)
+           - thân trên : từ kết cấu kế tiếp -> đỉnh    (z  0.2576 .. 0.8104)
+         Nhờ vậy tia quét ở z = 0.2209 đi thẳng ra ngoài, chỉ bị 4 cột che. -->
+    <collision name="chassis_lower">
+      <origin xyz="0 0 0.07507" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.5000 0.4400 0.20506"/>
+      </geometry>
+    </collision>
+
+    <collision name="chassis_upper">
+      <origin xyz="0.00400 -0.00973 0.53400" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.45400 0.37047 0.55281"/>
+      </geometry>
+    </collision>
+
+    <xacro:lidar_bay_post x=" 0.2100" y=" 0.1600"/>
+    <xacro:lidar_bay_post x=" 0.2100" y="-0.1600"/>
+    <xacro:lidar_bay_post x="-0.2100" y=" 0.1600"/>
+    <xacro:lidar_bay_post x="-0.2100" y="-0.1600"/>
+
+    <inertial>
+      <origin xyz="0.008394 -0.002306 0.286865" rpy="0 0 0"/>
+      <mass value="${chassis_mass}"/>
+      <inertia ixx="${chassis_mass*0.0654962}" ixy="${chassis_mass*-2.8533e-5}" ixz="${chassis_mass*-2.01131e-3}"
+               iyy="${chassis_mass*0.0754722}" iyz="${chassis_mass*5.33955e-4}"
+               izz="${chassis_mass*0.0396761}"/>
+    </inertial>
+  </link>
+
+  <!-- ===================== 2 bánh chủ động ===================== -->
+  <xacro:drive_wheel prefix="left"  reflect="1"/>
+  <xacro:drive_wheel prefix="right" reflect="-1"/>
+
+  <!-- ===================== 4 bánh caster =====================
+       Cùng 1 macro, cùng 1 file mesh, 4 vị trí khác nhau. -->
+  <xacro:caster_wheel prefix="front_left"  x="${ caster_x}" y="${ caster_y}"/>
+  <xacro:caster_wheel prefix="front_right" x="${ caster_x}" y="${-caster_y}"/>
+  <xacro:caster_wheel prefix="rear_left"   x="${-caster_x}" y="${ caster_y}"/>
+  <xacro:caster_wheel prefix="rear_right"  x="${-caster_x}" y="${-caster_y}"/>
+
+  <!-- ===================== Lidar ===================== -->
+  <xacro:rp_lidar parent="base_link"/>
+
+  <!-- ===================== Gazebo (tuỳ chọn) ===================== -->
+  <xacro:if value="$(arg sim_gazebo)">
+    <xacro:include filename="$(find a3_description)/urdf/a3.gazebo.xacro"/>
+  </xacro:if>
+
+</robot>

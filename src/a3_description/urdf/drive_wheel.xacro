@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Bánh chủ động. Dùng CHUNG một file mesh cho cả 2 bên
+       (left_wheel.STL và right_wheel.STL gốc trùng nhau từng byte),
+       chỉ khác dấu `reflect` để lật mặt bánh ra ngoài. -->
+  <xacro:macro name="drive_wheel" params="prefix reflect">
+
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <origin xyz="-0.0475 ${reflect*0.0096} ${-reflect*0.0475}"
+                rpy="${reflect*1.5707963268} 0 0"/>
+        <geometry>
+          <mesh filename="package://a3_description/meshes/drive_wheel.STL"
+                scale="${mesh_scale}"/>
+        </geometry>
+        <material name="a3_dark"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="1.5707963268 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+
+      <!-- Quán tính tính từ chính mesh (mật độ đều), quy về khối lượng wheel_mass -->
+      <inertial>
+        <origin xyz="0 ${reflect*0.00225} 0" rpy="0 0 0"/>
+        <mass value="${wheel_mass}"/>
+        <inertia ixx="${wheel_mass*6.6417e-4}" ixy="0.0" ixz="0.0"
+                 iyy="${wheel_mass*1.30590e-3}" iyz="0.0"
+                 izz="${wheel_mass*6.6418e-4}"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_wheel_link"/>
+      <origin xyz="0 ${reflect*wheel_separation/2} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.02" friction="0.01"/>
+    </joint>
+
+  </xacro:macro>
+</robot>

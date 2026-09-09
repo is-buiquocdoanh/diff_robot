@@ -51,10 +51,23 @@ const int PWM_RES = 8; // 8-bit
 // bus is remapped away from the ESP32 default pins (21/22) to avoid conflict.
 #define IMU_SDA_PIN 21
 #define IMU_SCL_PIN 19
-Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDRESS_A, &Wire);
+Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDRESS_B, &Wire);
 bool imuReady = false;
 const unsigned long IMU_SEND_INTERVAL = 20; // ms (~50 Hz)
 unsigned long lastImuSend = 0;
+
+// Thử khởi tạo BNO055 ở một địa chỉ I2C cụ thể. Module thực tế có thể trả
+// lời ở 0x29 (ADR nối 3.3V) hoặc 0x28 (ADR nối GND) tùy board, nên setup()
+// thử lần lượt cả hai thay vì chỉ cố định 0x28 như trước.
+bool tryInitBno(uint8_t address) {
+  bno = Adafruit_BNO055(55, address, &Wire);
+  if (!bno.begin(OPERATION_MODE_NDOF)) {
+    return false;
+  }
+  delay(50);
+  bno.setExtCrystalUse(true);
+  return true;
+}
 
 // Reads the BNO055's onboard sensor fusion output and sends it to the Pi as a
 // plain-text CSV line over USB Serial. Motor-command frames arriving on
@@ -161,16 +174,17 @@ void setup() {
   Serial.println("BTS7960 motor test ready.");
   Serial.println("Commands:\n  L <pwm 0-255> <dir 0|1|2>   - set left motor\n  R <pwm> <dir> - set right motor\n  S - stop both");
 
-  // IMU init
+  // IMU init: thử 0x29 trước, fallback sang 0x28 nếu không thấy
   Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN);
-  if (!bno.begin()) {
-    Serial.println("[IMU] BNO055 not detected - check wiring/address");
-    imuReady = false;
-  } else {
-    delay(50);
-    bno.setExtCrystalUse(true);
+  if (tryInitBno(BNO055_ADDRESS_B)) {
     imuReady = true;
-    Serial.println("[IMU] BNO055 ready");
+    Serial.println("[IMU] BNO055 ready (addr 0x29)");
+  } else if (tryInitBno(BNO055_ADDRESS_A)) {
+    imuReady = true;
+    Serial.println("[IMU] BNO055 ready (addr 0x28)");
+  } else {
+    imuReady = false;
+    Serial.println("[IMU] BNO055 not detected - check wiring/address");
   }
 }
 

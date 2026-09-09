@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==================================================================
+       Hằng số hình học - TẤT CẢ đo trực tiếp từ các file STL gốc (mm -> m)
+       Sửa ở đây là toàn bộ mô hình cập nhật theo.
+       ================================================================== -->
+
+  <!-- STL xuất từ CAD theo mm nên phải scale 0.001 -->
+  <xacro:property name="mesh_scale" value="0.001 0.001 0.001"/>
+
+  <!-- CAD dùng hệ Y-up, Z là trục dọc thân xe.
+       ROS dùng X-forward / Y-left / Z-up (REP-103)  =>  rpy = (pi/2, 0, +pi/2),
+       tức ros_x = mesh_z (tiến), ros_y = mesh_x (trái), ros_z = mesh_y (lên). -->
+  <xacro:property name="cad_rpy" value="1.5707963268 0 1.5707963268"/>
+  <!-- Riêng caster & bánh xe được xuất rời tại gốc toạ độ, chỉ cần xoay Y-up -> Z-up -->
+  <xacro:property name="yup_rpy" value="1.5707963268 0 0"/>
+
+  <!-- ========== Bánh chủ động (drive_wheel.STL: phi 95 x 19.2) ========== -->
+  <xacro:property name="wheel_radius"     value="0.0475"/>
+  <xacro:property name="wheel_width"      value="0.01920"/>
+  <!-- Tâm lỗ trục đo được trong chassis.STL: mặt bích trái x=57.33, phải x=387.33,
+       tâm khung x=222.33  =>  khoảng cách 2 bánh = 0.3492 m -->
+  <xacro:property name="wheel_separation" value="0.34920"/>
+  <xacro:property name="wheel_mass"       value="0.30"/>
+
+  <!-- ========== Bánh caster (caster_wheel.STL) ==========
+       Đế bắt bulông 60x60 mm; từ mặt đế xuống điểm tiếp đất = 68.99 mm.
+       Bánh phi 47.2 mm, lệch 25 mm sau trục xoay (trail). -->
+  <xacro:property name="caster_plate_to_ground" value="0.0689916"/>
+  <xacro:property name="caster_wheel_radius"    value="0.02359"/>
+  <xacro:property name="caster_trail"           value="0.02500"/>
+  <xacro:property name="caster_mass"            value="0.40"/>
+  <!-- Vị trí 4 trục xoay caster trên mặt đáy khung (chỉnh theo lỗ bắt thực tế) -->
+  <xacro:property name="caster_x" value="0.190"/>
+  <xacro:property name="caster_y" value="0.165"/>
+
+  <!-- ========== Khung (chassis.STL) ==========
+       Bao: 0.500 (dài, X) x 0.440 (rộng, Y) x 0.838 (cao, Z)
+       Đáy khung cách đất 0.0200 m -->
+  <xacro:property name="chassis_mass" value="18.0"/>
+
+  <!-- ========== Lidar (RP-Lidar.STL) ========== -->
+  <xacro:property name="lidar_mass" value="0.19"/>
+  <!-- Lidar đặt giữa sàn TẦNG 2. Mặt trên sàn tầng 2 đo được ở mesh y = 410.63 mm
+       => cao 0.17760 m so với base_link (0.2251 m so với mặt đất).
+       Khoảng hở phía trên sàn là 80 mm (kết cấu tiếp theo ở y = 490.63), lidar
+       cao 53.5 mm nên còn dư 26.5 mm. Xuyên qua khoảng hở này chỉ có 4 cột nhôm
+       20x20 ở (+-0.210, +-0.160) m, mỗi cột che ~6.2 độ tầm quét (do mô phỏng).
+       Trục quay lidar cao 43.308 mm so với đáy vỏ lidar. -->
+  <xacro:property name="deck2_top_z"   value="0.17760"/>
+  <xacro:property name="lidar_axis_up" value="0.043308"/>
+  <xacro:property name="lidar_x" value="0.0"/>
+  <xacro:property name="lidar_y" value="0.0"/>
+  <xacro:property name="lidar_z" value="${deck2_top_z + lidar_axis_up}"/>
+  <!-- Góc xoay của lidar quanh trục đứng. Cả vỏ lidar lẫn hệ trục laser_link
+       cùng xoay, đúng như xoay thiết bị thật trên giá đỡ.
+         +pi/2 : trục đỏ X sang trái,  trục xanh lá Y về SAU   (đang dùng)
+         -pi/2 : trục đỏ X sang phải,  trục xanh lá Y về TRƯỚC
+       Chênh nhau đúng 180 độ. -->
+  <xacro:property name="lidar_yaw" value="1.5707963268"/>
+
+  <!-- ================= Vật liệu hiển thị trong RViz ================= -->
+  <material name="a3_grey">   <color rgba="0.72 0.74 0.76 1.0"/></material>
+  <material name="a3_dark">   <color rgba="0.18 0.18 0.20 1.0"/></material>
+  <material name="a3_black">  <color rgba="0.08 0.08 0.08 1.0"/></material>
+  <material name="a3_orange"> <color rgba="0.90 0.45 0.10 1.0"/></material>
+
+</robot>
