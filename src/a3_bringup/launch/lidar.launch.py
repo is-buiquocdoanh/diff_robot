@@ -41,6 +41,11 @@ def generate_launch_description():
                 'scan_mode': 'Sensitivity',
             }],
             remappings=[('scan', 'scan_raw')],
+            # rplidar_node hiện crash (buffer overflow) thay vì báo lỗi gọn
+            # khi serial_port chưa tồn tại/chưa cắm lidar - respawn để tự
+            # khởi động lại thay vì im lặng chết hẳn.
+            respawn=True,
+            respawn_delay=2.0,
         ),
 
         # Lọc bỏ tia < 30cm (xem config/lidar_filter.yaml) rồi republish ra

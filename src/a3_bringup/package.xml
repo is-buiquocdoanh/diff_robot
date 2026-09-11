@@ -3,7 +3,7 @@
 <package format="3">
   <name>a3_bringup</name>
   <version>0.1.0</version>
-  <description>Bringup cho robot A3: khởi chạy RPLidar A1M8 và lọc khoảng cách laser.</description>
+  <description>Bringup cho robot A3: ESP32 (động cơ + IMU), odom, RPLidar A1M8.</description>
 
   <maintainer email="roboticsvn.ai@gmail.com">neo</maintainer>
   <license>Apache-2.0</license>
@@ -14,6 +14,11 @@
   <exec_depend>laser_filters</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>a3_driver</exec_depend>
+  <exec_depend>a3_description</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
