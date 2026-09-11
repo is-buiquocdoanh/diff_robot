@@ -1,0 +1,19 @@
+# Lọc khoảng cách cho /scan của RPLidar A1M8.
+#
+# Lidar đặt giữa sàn tầng 2, xung quanh có 4 trụ đỡ tầng trên (xem
+# a3_description/urdf/lidar.xacro) -> các trụ này luôn nằm trong bán kính
+# ~30cm quanh lidar và bị đọc nhầm thành 1 vòng vật cản cố định bao quanh
+# robot. Mọi tia có range < lower_threshold bị thay bằng +Inf (nghĩa là "tia
+# không chạm vật cản" theo REP-117), để slam_toolbox/nav2 coi đó là ô trống
+# thay vì vật cản ảo.
+scan_to_scan_filter_chain:
+  ros__parameters:
+    filter1:
+      name: min_range_filter
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        lower_threshold: 0.30
+        upper_threshold: 100.0
+        lower_replacement_value: .inf
+        upper_replacement_value: .inf

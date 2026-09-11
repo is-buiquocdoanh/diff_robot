@@ -13,3 +13,7 @@ kiến trúc driver của dự án mecanum trước đó.
     subscribe `Velquery` để đóng gói frame CAN-serial (14 byte:
     `0x2A | id(4) | data(8) | 0x23`) ghi xuống ESP32, đồng thời đọc dòng `IMU,...`
     ESP32 gửi lên và publish `sensor_msgs/Imu` trên `/imu/data`.
+- `src/a3_description` — URDF/xacro của robot A3 (khung, bánh, RPLidar) + launch RViz/Gazebo.
+- `src/a3_bringup` — bringup phần cảm biến: `launch/lidar.launch.py` chạy RPLidar A1M8
+  (`rplidar_ros`) và lọc bỏ các tia `/scan` gần hơn 30cm (4 trụ đỡ tầng trên che lidar)
+  bằng `laser_filters` trước khi publish `/scan` cho slam_toolbox/nav2.
