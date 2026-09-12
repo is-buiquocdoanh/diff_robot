@@ -33,7 +33,7 @@ install(DIRECTORY scripts msg
 install(PROGRAMS
   scripts/serial_bridge_node.py
   scripts/kinematic.py
-  scripts/odom_publisher_node.py
+  scripts/wheel_odom_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -13,16 +13,19 @@ kiến trúc driver của dự án mecanum trước đó.
     subscribe `Velquery` để đóng gói frame CAN-serial (14 byte:
     `0x2A | id(4) | data(8) | 0x23`) ghi xuống ESP32, đồng thời đọc dòng `IMU,...`
     ESP32 gửi lên và publish `sensor_msgs/Imu` trên `/imu/data`.
-  - `odom_publisher_node.py`: publish `/odom` + TF `odom -> base_footprint` mà KHÔNG
-    dùng encoder — lấy vận tốc (vx, wz) từ `/cmd_vel` (coi robot bám sát lệnh) và
-    lấy hướng (yaw) từ `/imu/data`. Chỉ là odometry tạm/xấp xỉ, dùng cho tới khi
-    driver có vòng điều khiển tốc độ (PID) + encoder feedback thật.
+  - `wheel_odom_node.py`: publish `/wheel/odom` (CHỈ vận tốc dài `vx`, từ `/cmd_vel`,
+    coi robot bám sát lệnh) làm nguồn "wheel odometry" giả cho EKF — KHÔNG tự tích
+    phân vị trí/hướng, KHÔNG broadcast TF (khác `odom_publisher_node.py` cũ đã bỏ).
 - `src/a3_description` — URDF/xacro của robot A3 (khung, bánh, RPLidar) + launch RViz/Gazebo.
 - `src/a3_bringup` — launch bringup:
   - `lidar.launch.py`: chạy RPLidar A1M8 (`rplidar_ros`) và lọc bỏ các tia `/scan`
     gần hơn 30cm (4 trụ đỡ tầng trên che lidar) bằng `laser_filters` trước khi
     publish `/scan` cho slam_toolbox/nav2.
-  - `odom.launch.py`: chạy `odom_publisher_node.py` (xem `a3_driver` ở trên).
+  - `ekf.launch.py`: chạy `ekf_node` (`robot_localization`), fusion `/wheel/odom`
+    (vx) + `/imu/data` (yaw + vyaw từ BNO055) theo covariance → `/odom` + TF
+    `odom -> base_footprint` mượt hơn nhiều so với tự ghi đè yaw thô mỗi tick.
+  - `odom.launch.py`: chạy `wheel_odom_node.py` + include `ekf.launch.py` — chạy
+    riêng file này là có ngay `/odom` đầy đủ.
   - `bringup.launch.py`: khởi chạy toàn bộ robot thật — `robot_state_publisher` +
     `joint_state_publisher` (URDF `a3_description`), `kinematic.py` +
     `serial_bridge_node.py`, `odom.launch.py`, `lidar.launch.py`. Dùng

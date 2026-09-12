@@ -1,0 +1,79 @@
+# EKF (robot_localization) fusion /wheel/odom (chỉ vx, từ cmd_vel) + /imu/data
+# (yaw + vyaw, từ BNO055) -> /odom + TF odom -> base_footprint.
+#
+# Không dùng thẳng cmd_vel/imu ghi đè odom mỗi tick như node cũ (gây rung khi
+# IMU nhiễu) - EKF lọc theo covariance nên mượt hơn nhiều, đồng thời tự tích
+# phân vị trí từ vận tốc thay vì tin tưởng tuyệt đối 1 nguồn.
+#
+# Thứ tự 15 phần tử trong *_config: [x, y, z, roll, pitch, yaw,
+#                                     vx, vy, vz, vroll, vpitch, vyaw,
+#                                     ax, ay, az]
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true
+    publish_tf: true
+    publish_acceleration: false
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+
+    # /wheel/odom: chỉ tin vx (coi robot bám sát lệnh cmd_vel), không tin vị
+    # trí/hướng do node nguồn không tự tính - xem wheel_odom_node.py.
+    odom0: /wheel/odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, false,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # /imu/data: chỉ tin yaw (đã fusion sẵn trên chip BNO055) + vận tốc góc
+    # đo trực tiếp - không dùng gia tốc dài (accel) để tránh nhiễu không cần
+    # thiết trong lúc chưa thật sự cần.
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
+
+    # Loại bỏ phép đo "nhảy" đột ngột: nếu 1 giá trị mới lệch khỏi state đang
+    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật
+    # theo (chống nhiễu tức thời, vd nhiễu từ trường lên magnetometer BNO055
+    # khi ở gần BTS7960/dây động cơ). Đơn vị: rad (pose), rad/s hoặc m/s (twist).
+    imu0_pose_rejection_threshold: 0.8    # ~45 độ
+    imu0_twist_rejection_threshold: 1.5   # rad/s
+    odom0_twist_rejection_threshold: 1.0  # m/s - chủ yếu chặn giá trị rác/hỏng
+
+    # process_noise_covariance: mức "không chắc chắn" nội bộ EKF tự cộng dồn
+    # mỗi giây giữa 2 lần đo (ma trận 15x15, cùng thứ tự state ở trên). Giá
+    # trị càng NHỎ thì EKF càng tin vào mô hình/dự đoán hơn là tin đo đạc mới
+    # -> mượt hơn nhưng phản ứng chậm hơn khi tốc độ đổi thật; càng LỚN thì
+    # bám sát đo đạc hơn nhưng dễ rung theo nhiễu cảm biến. Bắt đầu từ giá trị
+    # mẫu thường dùng của robot_localization, RIÊNG yaw/vyaw (đúng 2 trục đang
+    # bị rung) hạ thấp hơn để ưu tiên mượt - có thể tăng lại nếu thấy phản ứng
+    # xoay bị trễ/ì so với lệnh thật.
+    process_noise_covariance: [0.05, 0,    0,    0,    0,    0,     0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0.05, 0,    0,    0,    0,     0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0.06, 0,    0,    0,     0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0.03, 0,    0,     0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0.03, 0,     0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0.03,  0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0.025, 0,     0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0.04, 0,    0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0.01, 0,    0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0.01, 0,    0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,    0.01, 0,    0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,    0,    0.01, 0,    0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,    0,    0,    0.01, 0,
+                                0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,    0,    0,    0,    0.015]
