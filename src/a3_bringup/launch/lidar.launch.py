@@ -17,7 +17,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'serial_port', default_value='/dev/ydlidar',
+            'serial_port', default_value='/dev/rplidar',
             description='Cổng serial của RPLidar A1M8 (nên dùng udev symlink cố định, vd /dev/rplidar)'),
         DeclareLaunchArgument(
             'frame_id', default_value='laser_link',

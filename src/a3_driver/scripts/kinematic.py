@@ -28,7 +28,7 @@ class ControlMotorByKinematic(LifecycleNode):
                 ('rate', 100),
                 ('enb_debug', 0),
                 ('r_banh', 0.0475),
-                ('wheel_separation', 0.37),
+                ('wheel_separation', 0.365),
                 ('pwm_max', 255),
                 ('pwm_min', 0),
                 ('rpm_max', 320),

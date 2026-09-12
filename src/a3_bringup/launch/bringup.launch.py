@@ -44,7 +44,7 @@ def generate_launch_description():
             'esp32_port', default_value='/dev/esp32',
             description='Cổng USB nối ESP32 (lệnh động cơ + IMU dùng chung 1 cổng)'),
         DeclareLaunchArgument(
-            'lidar_port', default_value='/dev/ydlidar',
+            'lidar_port', default_value='/dev/rplidar',
             description='Cổng USB nối RPLidar A1M8'),
         DeclareLaunchArgument(
             'lidar_frame_id', default_value='laser_link',

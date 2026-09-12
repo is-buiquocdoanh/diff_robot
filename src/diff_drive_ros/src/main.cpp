@@ -2,6 +2,7 @@
 #include "driver/pcnt.h"
 #include <ctype.h>
 #include "can_serial.h"
+#include "wheel_pid.h"
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
@@ -46,6 +47,48 @@ unsigned long lastPacketMillis = 0;
 // PWM settings
 const int PWM_FREQ = 2000;
 const int PWM_RES = 8; // 8-bit
+
+// ==================== PID tốc độ (tùy chọn, mặc định TẮT) ====================
+// false: giữ nguyên hành vi cũ hoàn toàn - PWM nhận từ Pi được áp thẳng vào
+//        motor như trước khi có PID (đường an toàn, đã chạy ổn định).
+// true : dùng thêm PID bù dựa trên RPM đo từ encoder. Để tránh Kp/Ki/Kd chỉnh
+//        sai làm hỏng cả hệ, PID KHÔNG thay thế hoàn toàn phần tuyến tính -
+//        nó chỉ được "sửa" PWM feedforward trong khoảng +-PID_TRIM_LIMIT.
+const bool ENABLE_PID = true;
+
+// RPM_MAX phải khớp với tham số `rpm_max` bên kinematic.py (ROS2): PWM nhận
+// được (0..255) được quy đổi ngược thành RPM mục tiêu theo tỉ lệ này để làm
+// setpoint cho PID. Đo thực tế trên robot: PWM=255 -> ~325 RPM cả 2 bánh.
+const float RPM_MAX = 325.0f;
+
+// Biên độ tối đa PID được phép cộng/trừ vào PWM feedforward. Dù Kp/Ki/Kd bị
+// chỉnh quá tay, PWM cuối cùng cũng chỉ lệch khỏi mức tuyến tính tối đa
+// chừng này - không thể "bung" ra ngoài tầm kiểm soát.
+const float PID_TRIM_LIMIT = 80.0f;
+
+// Kp/Ki/Kd: giá trị khởi điểm AN TOÀN, CHƯA tune cho robot thật. Quy trình
+// tune khuyến nghị: bắt đầu chỉ với Kp (Ki=Kd=0), tăng dần tới khi bánh bám
+// tốc độ tốt mà không dao động/rung; sau đó thêm Ki nhỏ để triệt sai số ổn
+// định (RPM không về đúng setpoint dù đã chờ ổn định); chỉ thêm Kd nếu thấy
+// dao động cần giảm damping (Kd rất nhạy nhiễu vì RPM đo từ encoder có nhiễu
+// rời rạc, nên để 0 nếu không thật sự cần).
+const float PID_KP = 0.6f;
+const float PID_KI = 0.8f;
+const float PID_KD = 0.0f;
+
+const unsigned long PID_INTERVAL_MS = 20; // 50Hz, độc lập với PRINT_INTERVAL
+
+WheelPID leftPid(PID_KP, PID_KI, PID_KD, -PID_TRIM_LIMIT, PID_TRIM_LIMIT);
+WheelPID rightPid(PID_KP, PID_KI, PID_KD, -PID_TRIM_LIMIT, PID_TRIM_LIMIT);
+
+unsigned long lastPidMillis = 0;
+int16_t pidPrevTickLeft = 0;
+int16_t pidPrevTickRight = 0;
+
+// (dir, pwm) mới nhất nhận từ Pi, quy về 1 giá trị PWM có dấu (âm = lùi).
+// Nhánh không-PID dùng để áp thẳng như cũ; nhánh PID dùng làm setpoint.
+float targetLeftSigned = 0.0f;
+float targetRightSigned = 0.0f;
 
 // IMU (BNO055, I2C). GPIO22 is already used by ENC_RIGHT_FRONT_B, so the I2C
 // bus is remapped away from the ESP32 default pins (21/22) to avoid conflict.
@@ -120,6 +163,28 @@ void set_bts7960_pwm(int channelA, int channelB, int pwm, int dir) {
   } else {
     ledcWrite(channelA, 0);
     ledcWrite(channelB, 0);
+  }
+}
+
+// Quy đổi qua lại giữa (dir, pwm) của giao thức CAN-serial và 1 giá trị PWM
+// có dấu (âm = lùi) - tiện cho tính toán feedforward/PID.
+float dirPwmToSigned(int dir, int pwm) {
+  if (dir == 1) return (float)pwm;
+  if (dir == 2) return -(float)pwm;
+  return 0.0f;
+}
+
+void signedToDirPwm(float value, int &dir, int &pwm) {
+  int rounded = (int)roundf(value);
+  if (rounded > 0) {
+    dir = 1;
+    pwm = constrain(rounded, 0, 255);
+  } else if (rounded < 0) {
+    dir = 2;
+    pwm = constrain(-rounded, 0, 255);
+  } else {
+    dir = 0;
+    pwm = 0;
   }
 }
 
@@ -218,8 +283,74 @@ void loop() {
     int rf_pwm = pkt.data[3];
     lf_pwm = constrain(lf_pwm, 0, 255);
     rf_pwm = constrain(rf_pwm, 0, 255);
-    set_bts7960_pwm(CH_L_A, CH_L_B, lf_pwm, lf_dir);
-    set_bts7960_pwm(CH_R_A, CH_R_B, rf_pwm, rf_dir);
+
+    targetLeftSigned = dirPwmToSigned(lf_dir, lf_pwm);
+    targetRightSigned = dirPwmToSigned(rf_dir, rf_pwm);
+
+    if (!ENABLE_PID) {
+      // Hành vi cũ giữ nguyên y hệt: áp PWM nhận được thẳng vào motor ngay
+      // khi có packet, không qua PID.
+      set_bts7960_pwm(CH_L_A, CH_L_B, lf_pwm, lf_dir);
+      set_bts7960_pwm(CH_R_A, CH_R_B, rf_pwm, rf_dir);
+    }
+  }
+
+  // Vòng PID tốc độ (chỉ chạy khi ENABLE_PID = true), tách khỏi nhịp nhận
+  // packet để không phụ thuộc lúc nào Pi gửi lệnh - luôn bám theo
+  // targetLeft/RightSigned mới nhất bằng RPM đo thực tế từ encoder.
+  if (ENABLE_PID) {
+    unsigned long nowPid = millis();
+    if (nowPid - lastPidMillis >= PID_INTERVAL_MS) {
+      float dtPid = (nowPid - lastPidMillis) / 1000.0f;
+      lastPidMillis = nowPid;
+
+      int deltaL = (int)tickLeft - (int)pidPrevTickLeft;
+      int deltaR = (int)tickRight - (int)pidPrevTickRight;
+      if (deltaL > 10000) deltaL -= 32768;
+      if (deltaL < -10000) deltaL += 32768;
+      if (deltaR > 10000) deltaR -= 32768;
+      if (deltaR < -10000) deltaR += 32768;
+      pidPrevTickLeft = tickLeft;
+      pidPrevTickRight = tickRight;
+
+      if (dtPid > 0.0f) {
+        float measuredRpmLeft  = ((float)deltaL / (float)TICKS_PER_REV) * (60.0f / dtPid);
+        float measuredRpmRight = ((float)deltaR / (float)TICKS_PER_REV) * (60.0f / dtPid);
+
+        float setpointRpmLeft  = (targetLeftSigned  / 255.0f) * RPM_MAX;
+        float setpointRpmRight = (targetRightSigned / 255.0f) * RPM_MAX;
+
+        // Feedforward tuyến tính y hệt công thức PWM Pi đã tính (rpm_to_pwm
+        // bên kinematic.py), PID chỉ cộng thêm phần trim để bù sai số/vùng
+        // chết của motor - xem giải thích ở khai báo PID_TRIM_LIMIT.
+        float feedforwardLeft  = targetLeftSigned;
+        float feedforwardRight = targetRightSigned;
+
+        float trimLeft  = leftPid.compute(setpointRpmLeft,  measuredRpmLeft,  dtPid);
+        float trimRight = rightPid.compute(setpointRpmRight, measuredRpmRight, dtPid);
+
+        float outLeft  = constrain(feedforwardLeft  + trimLeft,  -255.0f, 255.0f);
+        float outRight = constrain(feedforwardRight + trimRight, -255.0f, 255.0f);
+
+        int dirL, pwmL, dirR, pwmR;
+        signedToDirPwm(outLeft, dirL, pwmL);
+        signedToDirPwm(outRight, dirR, pwmR);
+
+        // Setpoint = 0 (dừng): ép dừng hẳn, không để PID "rung" quanh 0 do
+        // nhiễu đếm encoder, đồng thời xóa tích phân để không giật khi chạy lại.
+        if (fabsf(targetLeftSigned) < 0.5f) {
+          dirL = 0; pwmL = 0;
+          leftPid.reset();
+        }
+        if (fabsf(targetRightSigned) < 0.5f) {
+          dirR = 0; pwmR = 0;
+          rightPid.reset();
+        }
+
+        set_bts7960_pwm(CH_L_A, CH_L_B, pwmL, dirL);
+        set_bts7960_pwm(CH_R_A, CH_R_B, pwmR, dirR);
+      }
+    }
   }
 
   // Stream IMU data to the Pi over USB Serial at a fixed rate, interleaved
@@ -240,6 +371,10 @@ void loop() {
       if (!stopped) {
         set_bts7960_pwm(CH_L_A, CH_L_B, 0, 0);
         set_bts7960_pwm(CH_R_A, CH_R_B, 0, 0);
+        targetLeftSigned = 0.0f;
+        targetRightSigned = 0.0f;
+        leftPid.reset();
+        rightPid.reset();
         Serial.println("[SAFETY] No packet timeout - motors stopped");
         stopped = true;
       }

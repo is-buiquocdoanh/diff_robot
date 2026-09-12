@@ -18,6 +18,7 @@ liệu IMU ngược lại, tất cả qua **1 cổng USB** dùng chung.
 9. [An toàn & xử lý sự cố](#9-an-toàn--xử-lý-sự-cố)
 10. [Hiệu chuẩn `rpm_physical_max` / `rpm_max`](#10-hiệu-chuẩn-rpm_physical_max--rpm_max)
 11. [Tích hợp IMU (BNO055)](#11-tích-hợp-imu-bno055)
+12. [PID tốc độ (tùy chọn)](#12-pid-tốc-độ-tùy-chọn)
 
 ---
 
@@ -233,8 +234,10 @@ Có thể dùng/sửa `test_send_loop.py` để gửi liên tục phục vụ te
 
 ## 10. Hiệu chuẩn `rpm_physical_max` / `rpm_max`
 
-- `rpm_physical_max`: đo bằng cách set PWM=255 và đọc RPM từ log encoder trên ESP32 — đây là RPM chạy không tải thực tế với hộp số/tải hiện tại.
+- `rpm_physical_max`: đo bằng cách set PWM=255 (lệnh ASCII `L 255 1` / `R 255 1` qua console debug, [mục 5](#5-console-debug-ascii)) và đọc RPM ổn định từ log encoder trên ESP32 — đây là RPM chạy thực tế với hộp số/tải hiện tại (không cần tháo bánh khỏi mặt đất).
 - `rpm_max` (tham số ROS): giới hạn an toàn RPM tối đa cho phép, nên đặt `rpm_max` ≤ `rpm_physical_max`.
+- Đo thực tế trên robot (2026-09-12): PWM=255 → **~325-326 RPM** cả 2 bánh (khá đối xứng, không lệch động cơ đáng kể). `RPM_MAX` trong firmware ([mục 12](#12-pid-tốc-độ-tùy-chọn)) và `rpm_max` bên `kinematic.py` nên khớp giá trị này.
+- Lưu ý khi test 1 vòng quay tại chỗ (`angular.z` cố định) mất lâu hơn tính toán (`2π/angular.z` giây): ánh xạ RPM→PWM hiện là tuyến tính từ 0, trong khi motor DC thực tế có "vùng chết" (PWM thấp không đủ thắng ma sát tĩnh) — RPM nhỏ tương ứng PWM quá thấp khiến bánh quay chậm hơn nhiều so với dự đoán tuyến tính. Đây là lý do thêm PID ở mục 12.
 
 ## 11. Tích hợp IMU (BNO055)
 
@@ -292,3 +295,59 @@ giây ở nhiều tư thế khác nhau (accel), xoay hình số 8 trong không k
 **Việc còn lại để có odometry hoàn chỉnh** (chưa nằm trong scope hiện tại):
 - Chạy `robot_localization` (hoặc tương tự) fusion `/imu/data` (orientation + angular velocity) với odometry tính từ encoder bánh xe, ra `/odom`.
 - Căn chỉnh trục IMU khớp với khung `base_link` của robot (nếu IMU lắp lệch hướng vật lý so với "trước" của robot, cần bù bằng `static_transform_publisher` hoặc offset quaternion trong code).
+
+## 12. PID tốc độ (tùy chọn)
+
+Mặc định firmware chạy **vòng hở** (open-loop): PWM Pi gửi xuống được áp thẳng
+vào motor, không có phản hồi từ encoder. Điều này khiến robot phản ứng phi
+tuyến ở tốc độ thấp (PWM nhỏ nằm trong vùng chết của motor DC — xem lưu ý ở
+[mục 10](#10-hiệu-chuẩn-rpm_physical_max--rpm_max)), ví dụ quay tại chỗ ở
+`angular.z` nhỏ chậm hơn nhiều so với tính toán lý thuyết.
+
+**Kiến trúc code**: logic PID tách hẳn khỏi `main.cpp` để dễ bật/tắt và dễ
+tune mà không phải đọc lại thuật toán:
+- `include/wheel_pid.h` + `src/wheel_pid.cpp`: class `WheelPID` — 1 bộ PID
+  chuẩn (P-I-D + anti-windup kiểu clamping) dùng chung cho cả 2 bánh.
+- `main.cpp`: chỉ có phần khai báo hằng số/tham số (`ENABLE_PID`, `RPM_MAX`,
+  `PID_KP/KI/KD`, `PID_TRIM_LIMIT`...) và phần gọi `leftPid.compute()` /
+  `rightPid.compute()` trong `loop()`.
+
+**Thiết kế an toàn — PID chỉ "sửa", không thay thế hoàn toàn vòng hở**:
+thay vì để PID tính PWM từ đầu (rủi ro cao nếu Kp/Ki/Kd chỉnh sai), PID chỉ
+được cộng thêm một khoảng bù (`trim`) giới hạn trong `±PID_TRIM_LIMIT`
+(mặc định `80`, trên thang PWM 0-255) vào PWM feedforward tuyến tính y hệt
+công thức Pi đã gửi. Nhờ vậy dù gain PID bị chỉnh sai, PWM cuối cùng cũng chỉ
+lệch khỏi mức "an toàn đã biết" tối đa `PID_TRIM_LIMIT`, không thể "bung" mất
+kiểm soát.
+
+**Bật/tắt**: đổi 1 dòng duy nhất trong `main.cpp`, nạp lại firmware:
+```cpp
+const bool ENABLE_PID = false;   // true để bật PID
+```
+- `false` (mặc định): hành vi y hệt trước khi có PID — PWM nhận từ Pi áp
+  thẳng vào motor ngay khi có packet.
+- `true`: PID chạy định kỳ mỗi `PID_INTERVAL_MS` (mặc định 20ms/50Hz), dùng
+  RPM đo từ encoder (PCNT) làm phản hồi, độc lập với nhịp packet tới từ Pi.
+
+**Tham số cần khớp với ROS2**: `RPM_MAX` trong `main.cpp` phải bằng (hoặc rất
+gần) `rpm_max` bên `kinematic.py`, vì PWM nhận được (0..255) được quy đổi
+ngược thành RPM setpoint theo tỉ lệ `RPM_MAX`. Giá trị đo thực tế hiện tại:
+**~325 RPM** ở PWM=255 ([mục 10](#10-hiệu-chuẩn-rpm_physical_max--rpm_max)).
+
+**Quy trình tune Kp/Ki/Kd** (làm từng bước, không đổi cả 3 cùng lúc):
+1. Đặt `PID_KI = 0`, `PID_KD = 0`, chỉ chỉnh `PID_KP` — tăng dần từ nhỏ tới
+   khi bánh bám tốc độ đặt khá tốt nhưng chưa dao động/rung.
+2. Thêm `PID_KI` nhỏ để triệt sai số ổn định (RPM không hội tụ đúng setpoint
+   dù đã chờ ổn định) — tăng từ từ, `Ki` quá lớn gây overshoot/dao động chậm.
+3. Chỉ thêm `PID_KD` nếu còn dao động cần giảm damping — `Kd` rất nhạy nhiễu
+   vì RPM tính từ đếm xung encoder rời rạc (không phải tín hiệu liên tục
+   mượt), nên để `0` nếu không thật sự cần.
+4. Sau mỗi lần đổi gain: nạp lại firmware, test với `L`/`R` (ASCII, [mục
+   5](#5-console-debug-ascii)) hoặc qua ROS2 (`teleop_twist_keyboard`), quan
+   sát RPM log ổn định có bám setpoint không, có rung/quá đà không.
+
+**Lưu ý khi bật PID**: lệnh ASCII `L`/`R`/`S` gọi thẳng `set_bts7960_pwm()`
+mà không cập nhật setpoint PID — nếu `ENABLE_PID = true`, vòng PID (chạy mỗi
+20ms) sẽ ghi đè lại PWM đó ngay theo lệnh nhị phân gần nhất từ Pi, khiến lệnh
+ASCII gần như vô tác dụng. Muốn test tay bằng ASCII, tạm để `ENABLE_PID =
+false`.
