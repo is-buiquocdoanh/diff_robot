@@ -19,6 +19,7 @@ liệu IMU ngược lại, tất cả qua **1 cổng USB** dùng chung.
 10. [Hiệu chuẩn `rpm_physical_max` / `rpm_max`](#10-hiệu-chuẩn-rpm_physical_max--rpm_max)
 11. [Tích hợp IMU (BNO055)](#11-tích-hợp-imu-bno055)
 12. [PID tốc độ (tùy chọn)](#12-pid-tốc-độ-tùy-chọn)
+13. [Tune PID bằng web tool (không cần firmware riêng)](#13-tune-pid-bằng-web-tool-không-cần-firmware-riêng)
 
 ---
 
@@ -238,6 +239,7 @@ Có thể dùng/sửa `test_send_loop.py` để gửi liên tục phục vụ te
 - `rpm_max` (tham số ROS): giới hạn an toàn RPM tối đa cho phép, nên đặt `rpm_max` ≤ `rpm_physical_max`.
 - Đo thực tế trên robot (2026-09-12): PWM=255 → **~325-326 RPM** cả 2 bánh (khá đối xứng, không lệch động cơ đáng kể). `RPM_MAX` trong firmware ([mục 12](#12-pid-tốc-độ-tùy-chọn)) và `rpm_max` bên `kinematic.py` nên khớp giá trị này.
 - Lưu ý khi test 1 vòng quay tại chỗ (`angular.z` cố định) mất lâu hơn tính toán (`2π/angular.z` giây): ánh xạ RPM→PWM hiện là tuyến tính từ 0, trong khi motor DC thực tế có "vùng chết" (PWM thấp không đủ thắng ma sát tĩnh) — RPM nhỏ tương ứng PWM quá thấp khiến bánh quay chậm hơn nhiều so với dự đoán tuyến tính. Đây là lý do thêm PID ở mục 12.
+- **Đã fix bug tính RPM trong `main.cpp` (2026-09-xx)**: `setupPCNT()` chỉ dùng 1 channel PCNT đếm cả 2 cạnh của riêng kênh A (kiểu đếm 2x), KHÔNG phải quadrature 4x thật, nhưng code cũ lại nhân với `QUAD_FACTOR=4` và `GEARBOX_RATIO=38` (gearbox thật là `19.2`) khiến `TICKS_PER_REV` bị tính gấp ~4 lần giá trị đúng — mọi RPM `main.cpp` tự đo (debug log lẫn phản hồi cho PID ở mục 12) đọc ra chỉ bằng ~1/4 giá trị thật. Đã sửa về `EDGE_COUNT=2`, `GEARBOX_RATIO=19.2` khớp với số đo `rpm_physical_max` ở trên. Nếu trước đó bạn thấy RPM debug trên `main.cpp` thấp bất thường so với lúc test bằng code rời, đây chính là nguyên nhân.
 
 ## 11. Tích hợp IMU (BNO055)
 
@@ -351,3 +353,78 @@ mà không cập nhật setpoint PID — nếu `ENABLE_PID = true`, vòng PID (c
 20ms) sẽ ghi đè lại PWM đó ngay theo lệnh nhị phân gần nhất từ Pi, khiến lệnh
 ASCII gần như vô tác dụng. Muốn test tay bằng ASCII, tạm để `ENABLE_PID =
 false`.
+
+## 13. Tune PID bằng web tool (không cần firmware riêng)
+
+Trước đây phải nạp 1 firmware riêng (project `diff_tune_PID`) để tune bằng
+web tool, tune xong lại chép tay Kp/Ki/Kd sang `main.cpp` rồi nạp lại lần
+nữa — mất thời gian đổi qua đổi lại 2 project. Giờ giao thức tune đã gộp
+thẳng vào `main.cpp` (dùng lại đúng `WheelPID`/`leftPid`/`rightPid` đang có),
+bật/tắt bằng lệnh ASCII qua Serial — **1 firmware duy nhất** vừa chạy sản
+xuất vừa tune được, không cần nạp lại để chuyển qua lại.
+
+**Web tool KHÔNG liên quan gì tới ROS2** — nó nối **thẳng vào ESP32** qua
+cổng USB bằng Web Serial API của trình duyệt, y hệt cắm USB rồi mở terminal
+gõ lệnh: các nút Tiến/Lùi/Xoay CW/CCW/Tùy chỉnh chỉ gửi lệnh text
+(`V,<rpm_trái>,<rpm_phải>`) thẳng xuống ESP32, slider Kp/Ki/Kd gửi
+(`K,<kp>,<ki>,<kd>`) — không đi qua `/cmd_vel`, không qua `kinematic.py`,
+không qua node ROS2 nào cả. Chính vì thế **bắt buộc phải dừng ROS2 trước khi
+tune** — không phải vì tune cần ROS2, mà vì 1 cổng USB chỉ 1 chương trình
+được mở cùng lúc: nếu `bringup.launch.py`/`serial_bridge_node.py` còn giữ
+cổng, trình duyệt sẽ không mở được (hoặc mở được nhưng dữ liệu đọc/ghi bị
+tranh chấp/nhiễu, xem [mục 9](#9-an-toàn--xử-lý-sự-cố)).
+
+Quy trình đầy đủ:
+1. Dừng ROS2 (`bringup.launch.py` hoặc ít nhất `serial_bridge_node.py`).
+2. Mở web tool, bấm **Kết nối** — ESP32 chuyển sang chế độ tune (`T,1`), tạm
+   quên hẳn giao thức ROS.
+3. Test Tiến/Lùi/Xoay, chỉnh Kp/Ki/Kd, xem đồ thị — toàn bộ chỉ giữa trình
+   duyệt ↔ ESP32.
+4. Bấm **Ngắt** — ESP32 tự quay lại chế độ sản xuất (`T,0`), sẵn sàng nhận
+   lệnh ROS lại như cũ.
+5. Copy bộ số Kp/Ki/Kd hiển thị sẵn, dán vào `main.cpp` (mục
+   [12](#12-pid-tốc-độ-tùy-chọn)), nạp lại firmware 1 lần để lưu vĩnh viễn
+   (gains đặt qua lệnh `K` lúc tune chỉ ở RAM, mất khi mất nguồn).
+6. Bật lại ROS2 bình thường (`bringup.launch.py`).
+
+**Web tool**: [tools/web/pid_tuner.html](tools/web/pid_tuner.html) — mở bằng
+Chrome/Edge (cần Web Serial API, không chạy trên Firefox/Safari):
+```bash
+cd src/diff_drive_ros/tools/web
+python3 -m http.server 8000
+# mở http://localhost:8000/pid_tuner.html
+```
+hoặc mở trực tiếp file bằng Chrome nếu trình duyệt không chặn `file://`.
+
+Quy trình test/tune, đọc đồ thị, chỉ số overshoot/rise time/settle time —
+xem hướng dẫn gốc trong `~/diff_tune_PID/README.md` (Bước 3-4), áp dụng y
+hệt vì cùng giao thức.
+
+**Lưu ý khi mang bộ số về sản xuất**: khi tune, PID chạy **full-authority**
+(`T,1` tự set `leftPid`/`rightPid` sang biên độ `±255`, tự tính thẳng PWM,
+không cộng feedforward — để đồ thị phản ánh đúng hành vi thuần của PID). Bấm
+**Ngắt** tự trả lại biên độ `±PID_TRIM_LIMIT` như sản xuất. Muốn dùng thẳng
+bộ số vừa tune (không quy đổi) cho sản xuất, đổi luôn kiến trúc trim hiện tại
+sang full-authority: `PID_TRIM_LIMIT = 255.0f` và `feedforwardLeft`/
+`feedforwardRight` = `0` trong khối PID ở [mục 12](#12-pid-tốc-độ-tùy-chọn)
+— hoặc giữ kiến trúc trim và tự tune lại 1 bộ số *nhỏ hơn* riêng cho vai trò
+trim.
+
+**Giao thức Serial** (thêm vào ASCII console ở [mục 5](#5-console-debug-ascii),
+baud 115200, mỗi lệnh 1 dòng kết thúc `\n`):
+
+| Lệnh | Ý nghĩa |
+|---|---|
+| `T,<0\|1>` | Bật/tắt chế độ tune |
+| `K,<kp>,<ki>,<kd>` | Set gains PID cho cả 2 bánh |
+| `V,<left_rpm>,<right_rpm>` | Set setpoint RPM có dấu — chỉ có tác dụng khi đang ở chế độ tune |
+| `S` | Dừng ngay + reset PID (dùng được cả 2 chế độ) |
+
+ESP32 gửi liên tục ~50Hz khi đang ở chế độ tune:
+```
+D,<t_ms>,<sp_left>,<meas_left>,<pwm_left>,<sp_right>,<meas_right>,<pwm_right>
+```
+
+An toàn: mất kết nối (không `K`/`V`/`S`/`T` nào tới trong >500ms) khi đang ở
+chế độ tune → tự dừng cả 2 bánh + reset PID (an toàn cho ASCII debug `L`/`R`
+vẫn dùng được bình thường khi **không** ở chế độ tune).

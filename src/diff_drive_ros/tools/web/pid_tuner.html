@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diff Drive PID Tuner (diff_drive_ros)</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1a1d23; --muted: #6b7280;
+    --border: #e2e5ea; --accent: #2563eb; --accent2: #ea580c;
+    --danger: #dc2626; --ok: #16a34a; --input-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1c1f26; --text: #e7e9ee; --muted: #8b93a1;
+      --border: #2b2f38; --accent: #5b8def; --accent2: #f0904a;
+      --danger: #f87171; --ok: #4ade80; --input-bg: #11131720;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 16px;
+  }
+  h1 { font-size: 16px; margin: 0 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 12px; }
+  .grid {
+    display: grid; grid-template-columns: 260px 1fr 280px; gap: 12px;
+    align-items: start;
+  }
+  @media (max-width: 1300px) {
+    .grid { grid-template-columns: 260px 1fr; }
+    .col-right { grid-column: 1 / -1; }
+    .col-right .panel { display: inline-block; vertical-align: top; width: 300px; margin-right: 10px; }
+  }
+  @media (max-width: 820px) {
+    .grid { grid-template-columns: 1fr; }
+    .col-right { grid-column: auto; }
+    .col-right .panel { display: block; width: auto; margin-right: 0; }
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 11px; margin-bottom: 9px;
+  }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); margin: 0 0 10px; }
+  label { display: block; font-size: 11.5px; color: var(--muted); margin: 6px 0 2px; }
+  input[type=number], select {
+    width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--input-bg); color: var(--text); font-size: 13px;
+  }
+  input[type=range] { width: 100%; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 12.5px;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .btnrow button { flex: 1 1 45%; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .dot.on { background: var(--ok); }
+  .gain-val { font-size: 12px; color: var(--muted); text-align: right; }
+  canvas { width: 100%; display: block; border-radius: 8px; background: var(--panel);
+    border: 1px solid var(--border); }
+  .legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--muted); margin: 6px 2px 0; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-col h3 { font-size: 11.5px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .stat-col div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12.5px; }
+  .stat-col div b { font-weight: 600; }
+  #log {
+    width: 100%; height: 110px; resize: vertical; background: var(--input-bg);
+    color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; padding: 6px;
+  }
+  #exportBox {
+    width: 100%; background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; padding: 8px;
+    white-space: pre;
+  }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Diff Drive PID Tuner</h1>
+<p class="sub">Kết nối trực tiếp ESP32 (firmware sản xuất diff_drive_ros) qua USB Serial (Web Serial API) — chỉnh Kp/Ki/Kd và xem đáp ứng RPM theo thời gian thực. Tự động gửi lệnh vào/ra chế độ tune khi Kết nối/Ngắt. <b>Nhớ dừng bringup/serial_bridge_node.py trước</b> — chỉ 1 process được mở cổng serial của ESP32 cùng lúc.</p>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>Kết nối</h2>
+      <div class="btnrow">
+        <button id="btnConnect" class="primary">Kết nối</button>
+        <button id="btnDisconnect" disabled>Ngắt</button>
+      </div>
+      <div class="status" style="margin-top:8px;">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">Chưa kết nối</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>PID Gains</h2>
+      <label>Kp <span class="gain-val" id="kpVal">0.000</span></label>
+      <input type="range" id="kpSlider" min="0" max="5" step="0.005" value="0">
+      <input type="number" id="kpNum" step="0.001" value="0">
+
+      <label>Ki <span class="gain-val" id="kiVal">0.000</span></label>
+      <input type="range" id="kiSlider" min="0" max="5" step="0.005" value="0">
+      <input type="number" id="kiNum" step="0.001" value="0">
+
+      <label>Kd <span class="gain-val" id="kdVal">0.000</span></label>
+      <input type="range" id="kdSlider" min="0" max="1" step="0.001" value="0">
+      <input type="number" id="kdNum" step="0.0001" value="0">
+    </div>
+
+    <div class="panel">
+      <h2>Test chuyển động (2 bánh đối xứng)</h2>
+      <label>Tốc độ (RPM)</label>
+      <input type="number" id="speedInput" value="150" step="10">
+      <div class="btnrow">
+        <button id="btnForward">Tiến (L=R=+v)</button>
+        <button id="btnBackward">Lùi (L=R=-v)</button>
+        <button id="btnRotCW">Xoay CW (L=+v,R=-v)</button>
+        <button id="btnRotCCW">Xoay CCW (L=-v,R=+v)</button>
+      </div>
+      <button id="btnStop" class="danger" style="width:100%; margin-top:8px;">STOP</button>
+    </div>
+
+    <div class="panel">
+      <h2>Test tùy chỉnh / từng bánh</h2>
+      <div class="row">
+        <div><label>Target trái (RPM)</label><input type="number" id="leftCustom" value="150" step="10"></div>
+        <div><label>Target phải (RPM)</label><input type="number" id="rightCustom" value="0" step="10"></div>
+      </div>
+      <button id="btnApplyCustom" style="width:100%; margin-top:8px;">Áp dụng</button>
+
+      <label style="margin-top:12px;"><input type="checkbox" id="squareToggle" style="width:auto; vertical-align:middle;"> Bật square wave (đảo giữa 0 và giá trị đang áp dụng)</label>
+      <label>Chu kỳ mỗi mức (ms)</label>
+      <input type="number" id="squarePeriod" value="1500" step="100">
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <h2 style="margin:0;">Đáp ứng RPM</h2>
+        <select id="windowSec" style="width:auto;">
+          <option value="5">5s</option>
+          <option value="10" selected>10s</option>
+          <option value="20">20s</option>
+          <option value="30">30s</option>
+        </select>
+      </div>
+      <canvas id="chartRpm" height="260"></canvas>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--accent)"></i>Trái - đo được</span>
+        <span><i class="swatch" style="background:var(--accent); opacity:.45; border-top:2px dashed var(--accent); height:0;"></i>Trái - setpoint</span>
+        <span><i class="swatch" style="background:var(--accent2)"></i>Phải - đo được</span>
+        <span><i class="swatch" style="background:var(--accent2); opacity:.45; border-top:2px dashed var(--accent2); height:0;"></i>Phải - setpoint</span>
+      </div>
+
+      <h2 style="margin-top:10px;">PWM output</h2>
+      <canvas id="chartPwm" height="90"></canvas>
+    </div>
+  </div>
+
+  <div class="col-right">
+    <div class="panel">
+      <h2>Chỉ số đáp ứng (bước gần nhất mỗi bánh)</h2>
+      <div class="stats">
+        <div class="stat-col">
+          <h3>Bánh trái</h3>
+          <div><span>Overshoot</span><b id="statOsL">-</b></div>
+          <div><span>Rise time (10→90%)</span><b id="statRiseL">-</b></div>
+          <div><span>Settle time (±5%)</span><b id="statSettleL">-</b></div>
+        </div>
+        <div class="stat-col">
+          <h3>Bánh phải</h3>
+          <div><span>Overshoot</span><b id="statOsR">-</b></div>
+          <div><span>Rise time (10→90%)</span><b id="statRiseR">-</b></div>
+          <div><span>Settle time (±5%)</span><b id="statSettleR">-</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Xuất bộ số về main.cpp thật</h2>
+      <div id="exportBox">const float PID_KP = 0.000f;
+const float PID_KI = 0.000f;
+const float PID_KD = 0.000f;</div>
+      <button id="btnCopy" style="margin-top:8px;">Copy</button>
+    </div>
+
+    <details class="panel">
+      <summary>Log dữ liệu thô</summary>
+      <textarea id="log" readonly></textarea>
+    </details>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ---------- Web Serial ----------
+let port = null, writer = null, reader = null, cssReader = null;
+let connected = false;
+let heartbeatInterval = null;
+
+// Firmware tự dừng động cơ nếu không nhận được lệnh nào trong >500ms (an
+// toàn khi mất kết nối). Vì các nút test chỉ gửi lệnh V một lần khi bấm, cần
+// gửi lại setpoint hiện tại đều đặn để xe chạy liên tục thay vì tự dừng sau
+// nửa giây.
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatInterval = setInterval(() => {
+    sendLine(`V,${currentLeftTarget},${currentRightTarget}`);
+  }, 150);
+}
+function stopHeartbeat() {
+  if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+}
+
+function setConnected(v) {
+  connected = v;
+  $('btnConnect').disabled = v;
+  $('btnDisconnect').disabled = !v;
+  $('dot').classList.toggle('on', v);
+  $('statusText').textContent = v ? 'Đã kết nối' : 'Chưa kết nối';
+}
+
+async function connectSerial() {
+  if (!('serial' in navigator)) {
+    alert('Trình duyệt không hỗ trợ Web Serial API. Hãy dùng Chrome hoặc Edge.');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    setConnected(true);
+    // Firmware diff_drive_ros mặc định chạy chế độ sản xuất (ROS điều khiển
+    // qua frame nhị phân) - phải chủ động bật chế độ tune (PID full-authority,
+    // điều khiển bằng K/V/S) thì các lệnh dưới đây mới có tác dụng.
+    sendLine('T,1');
+    startHeartbeat();
+    readLoop();
+  } catch (e) {
+    logLine('[ERR] connect: ' + e);
+  }
+}
+
+async function disconnectSerial() {
+  stopHeartbeat();
+  // Thoát chế độ tune, trả quyền điều khiển lại cho ROS trước khi đóng cổng.
+  try { await sendLine('T,0'); } catch (e) {}
+  try { if (reader) await reader.cancel(); } catch (e) {}
+  try { if (writer) { await writer.close(); } } catch (e) {}
+  try { if (port) await port.close(); } catch (e) {}
+  port = null; writer = null; reader = null;
+  setConnected(false);
+}
+
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  const closedPromise = port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+  let buf = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        buf += value;
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (line) onLine(line);
+        }
+      }
+    }
+  } catch (e) {
+    logLine('[ERR] read: ' + e);
+  } finally {
+    stopHeartbeat();
+    setConnected(false);
+  }
+}
+
+async function sendLine(s) {
+  if (!writer) return;
+  try {
+    await writer.write(new TextEncoder().encode(s + '\n'));
+  } catch (e) {
+    logLine('[ERR] write: ' + e);
+  }
+}
+
+$('btnConnect').addEventListener('click', connectSerial);
+$('btnDisconnect').addEventListener('click', disconnectSerial);
+
+// ---------- Log ----------
+function logLine(s) {
+  const el = $('log');
+  el.value += s + '\n';
+  if (el.value.length > 20000) el.value = el.value.slice(-15000);
+  el.scrollTop = el.scrollHeight;
+}
+
+function onLine(line) {
+  logLine(line);
+  if (line[0] === 'D') {
+    const p = line.split(',');
+    // D,t,spL,measL,pwmL,spR,measR,pwmR
+    if (p.length >= 8) {
+      const t = parseFloat(p[1]);
+      const spL = parseFloat(p[2]), measL = parseFloat(p[3]), pwmL = parseFloat(p[4]);
+      const spR = parseFloat(p[5]), measR = parseFloat(p[6]), pwmR = parseFloat(p[7]);
+      pushSample(t, spL, measL, pwmL, spR, measR, pwmR);
+    }
+  }
+}
+
+// ---------- PID gains UI ----------
+function syncGain(sliderId, numId, valId, onChange) {
+  const slider = $(sliderId), num = $(numId), val = $(valId);
+  function apply(v) {
+    val.textContent = Number(v).toFixed(3);
+    onChange();
+  }
+  slider.addEventListener('input', () => { num.value = slider.value; apply(slider.value); });
+  num.addEventListener('input', () => {
+    const v = parseFloat(num.value) || 0;
+    if (v >= parseFloat(slider.min) && v <= parseFloat(slider.max)) slider.value = v;
+    apply(v);
+  });
+}
+
+let sendGainsTimer = null;
+function scheduleSendGains() {
+  clearTimeout(sendGainsTimer);
+  sendGainsTimer = setTimeout(() => {
+    const kp = parseFloat($('kpNum').value) || 0;
+    const ki = parseFloat($('kiNum').value) || 0;
+    const kd = parseFloat($('kdNum').value) || 0;
+    sendLine(`K,${kp},${ki},${kd}`);
+    updateExport(kp, ki, kd);
+  }, 120);
+}
+
+syncGain('kpSlider', 'kpNum', 'kpVal', scheduleSendGains);
+syncGain('kiSlider', 'kiNum', 'kiVal', scheduleSendGains);
+syncGain('kdSlider', 'kdNum', 'kdVal', scheduleSendGains);
+
+function updateExport(kp, ki, kd) {
+  $('exportBox').textContent =
+`const float PID_KP = ${kp.toFixed(4)}f;
+const float PID_KI = ${ki.toFixed(4)}f;
+const float PID_KD = ${kd.toFixed(4)}f;`;
+}
+
+$('btnCopy').addEventListener('click', () => {
+  navigator.clipboard.writeText($('exportBox').textContent).then(() => {
+    $('btnCopy').textContent = 'Đã copy!';
+    setTimeout(() => { $('btnCopy').textContent = 'Copy'; }, 1200);
+  });
+});
+
+// ---------- Motion test controls ----------
+let currentLeftTarget = 0, currentRightTarget = 0;
+
+function applyTargets(l, r) {
+  currentLeftTarget = l;
+  currentRightTarget = r;
+  sendLine(`V,${l},${r}`);
+  stepAnalyzerL.startStep(lastT || 0, lastMeasL || 0, l);
+  stepAnalyzerR.startStep(lastT || 0, lastMeasR || 0, r);
+}
+
+$('btnForward').addEventListener('click', () => {
+  const v = parseFloat($('speedInput').value) || 0;
+  applyTargets(v, v);
+});
+$('btnBackward').addEventListener('click', () => {
+  const v = parseFloat($('speedInput').value) || 0;
+  applyTargets(-v, -v);
+});
+$('btnRotCW').addEventListener('click', () => {
+  const v = parseFloat($('speedInput').value) || 0;
+  applyTargets(v, -v);
+});
+$('btnRotCCW').addEventListener('click', () => {
+  const v = parseFloat($('speedInput').value) || 0;
+  applyTargets(-v, v);
+});
+$('btnApplyCustom').addEventListener('click', () => {
+  const l = parseFloat($('leftCustom').value) || 0;
+  const r = parseFloat($('rightCustom').value) || 0;
+  applyTargets(l, r);
+});
+$('btnStop').addEventListener('click', () => {
+  stopSquareWave();
+  applyTargets(0, 0);
+  sendLine('S');
+});
+
+// ---------- Square wave ----------
+let squareInterval = null;
+let squareHigh = false;
+function stopSquareWave() {
+  if (squareInterval) { clearInterval(squareInterval); squareInterval = null; }
+  $('squareToggle').checked = false;
+}
+$('squareToggle').addEventListener('change', () => {
+  if ($('squareToggle').checked) {
+    const period = Math.max(200, parseFloat($('squarePeriod').value) || 1500);
+    const highL = currentLeftTarget, highR = currentRightTarget;
+    squareHigh = true;
+    squareInterval = setInterval(() => {
+      squareHigh = !squareHigh;
+      if (squareHigh) applyTargets(highL, highR);
+      else applyTargets(0, 0);
+    }, period);
+  } else {
+    stopSquareWave();
+  }
+});
+
+// ---------- Data buffer ----------
+const MAX_SAMPLES = 3000;
+let buf = { t: [], spL: [], measL: [], pwmL: [], spR: [], measR: [], pwmR: [] };
+let lastT = 0, lastMeasL = 0, lastMeasR = 0;
+let prevSpL = null, prevSpR = null;
+
+function pushSample(t, spL, measL, pwmL, spR, measR, pwmR) {
+  buf.t.push(t); buf.spL.push(spL); buf.measL.push(measL); buf.pwmL.push(pwmL);
+  buf.spR.push(spR); buf.measR.push(measR); buf.pwmR.push(pwmR);
+  if (buf.t.length > MAX_SAMPLES) {
+    for (const k in buf) buf[k].shift();
+  }
+  lastT = t; lastMeasL = measL; lastMeasR = measR;
+
+  if (prevSpL !== null && Math.abs(spL - prevSpL) > 0.5) stepAnalyzerL.startStep(t, prevMeasAtStepL(), spL);
+  if (prevSpR !== null && Math.abs(spR - prevSpR) > 0.5) stepAnalyzerR.startStep(t, prevMeasAtStepR(), spR);
+  prevSpL = spL; prevSpR = spR;
+
+  stepAnalyzerL.update(t, measL);
+  stepAnalyzerR.update(t, measR);
+  renderStats();
+}
+
+function prevMeasAtStepL() { return buf.measL.length ? buf.measL[buf.measL.length - 1] : 0; }
+function prevMeasAtStepR() { return buf.measR.length ? buf.measR[buf.measR.length - 1] : 0; }
+
+// ---------- Step response analyzer ----------
+function makeStepAnalyzer() {
+  return {
+    active: false, t0: 0, from: 0, to: 0, peak: 0, rangeAbs: 0,
+    t10: null, t90: null, settleStart: null, settleTime: null,
+    startStep(t0, from, to) {
+      this.t0 = t0; this.from = from; this.to = to;
+      this.rangeAbs = Math.abs(to - from);
+      this.active = this.rangeAbs > 1;
+      this.peak = from;
+      this.t10 = null; this.t90 = null;
+      this.settleStart = null; this.settleTime = null;
+    },
+    update(t, measured) {
+      if (!this.active) return;
+      const dir = this.to > this.from ? 1 : -1;
+      if (dir > 0) this.peak = Math.max(this.peak, measured);
+      else this.peak = Math.min(this.peak, measured);
+
+      const progress = (measured - this.from) / (this.to - this.from);
+      if (this.t10 === null && progress >= 0.1) this.t10 = t;
+      if (this.t90 === null && progress >= 0.9) this.t90 = t;
+
+      const band = Math.max(this.rangeAbs * 0.05, 3);
+      if (Math.abs(measured - this.to) <= band) {
+        if (this.settleStart === null) this.settleStart = t;
+        else if (this.settleTime === null && (t - this.settleStart) >= 300) {
+          this.settleTime = this.settleStart - this.t0;
+        }
+      } else {
+        this.settleStart = null;
+      }
+    },
+    overshootPct() {
+      if (!this.active || this.rangeAbs < 1e-6) return null;
+      const dir = this.to > this.from ? 1 : -1;
+      const beyond = dir > 0 ? (this.peak - this.to) : (this.to - this.peak);
+      return Math.max(0, (beyond / this.rangeAbs) * 100);
+    },
+    riseTimeMs() {
+      if (this.t10 === null || this.t90 === null) return null;
+      return this.t90 - this.t10;
+    },
+    settleTimeMs() { return this.settleTime; }
+  };
+}
+const stepAnalyzerL = makeStepAnalyzer();
+const stepAnalyzerR = makeStepAnalyzer();
+
+function fmtMs(v) { return v === null || v === undefined ? '-' : `${Math.round(v)} ms`; }
+function fmtPct(v) { return v === null || v === undefined ? '-' : `${v.toFixed(1)} %`; }
+
+function renderStats() {
+  $('statOsL').textContent = fmtPct(stepAnalyzerL.overshootPct());
+  $('statRiseL').textContent = fmtMs(stepAnalyzerL.riseTimeMs());
+  $('statSettleL').textContent = fmtMs(stepAnalyzerL.settleTimeMs());
+  $('statOsR').textContent = fmtPct(stepAnalyzerR.overshootPct());
+  $('statRiseR').textContent = fmtMs(stepAnalyzerR.riseTimeMs());
+  $('statSettleR').textContent = fmtMs(stepAnalyzerR.settleTimeMs());
+}
+
+// ---------- Chart rendering ----------
+function themeColor(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function setupCanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight || parseInt(canvas.getAttribute('height'));
+  canvas.width = w * ratio;
+  canvas.height = h * ratio;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(ratio, ratio);
+  return { ctx, w, h };
+}
+
+function drawRpmChart() {
+  const canvas = $('chartRpm');
+  const { ctx, w, h } = setupCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+
+  const windowSec = parseFloat($('windowSec').value);
+  const tNow = buf.t.length ? buf.t[buf.t.length - 1] : 0;
+  const tMin = tNow - windowSec * 1000;
+
+  let i0 = 0;
+  for (let i = buf.t.length - 1; i >= 0; i--) { if (buf.t[i] < tMin) { i0 = i + 1; break; } }
+  const t = buf.t.slice(i0), spL = buf.spL.slice(i0), measL = buf.measL.slice(i0);
+  const spR = buf.spR.slice(i0), measR = buf.measR.slice(i0);
+
+  const border = themeColor('--border'), muted = themeColor('--muted');
+  const accent = themeColor('--accent'), accent2 = themeColor('--accent2');
+
+  const padL = 42, padR = 8, padT = 8, padB = 18;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+
+  let yMin = 0, yMax = 10;
+  if (t.length) {
+    const all = spL.concat(measL, spR, measR);
+    yMin = Math.min(...all); yMax = Math.max(...all);
+    if (yMin > 0) yMin = 0;
+    if (yMax < 0) yMax = 0;
+    const pad = Math.max((yMax - yMin) * 0.12, 5);
+    yMin -= pad; yMax += pad;
+  }
+
+  function xPix(tv) { return padL + ((tv - tMin) / (windowSec * 1000)) * plotW; }
+  function yPix(v) { return padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH; }
+
+  ctx.strokeStyle = border; ctx.fillStyle = muted; ctx.font = '10px sans-serif';
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const v = yMin + (yMax - yMin) * g / 4;
+    const py = yPix(v);
+    ctx.beginPath(); ctx.moveTo(padL, py); ctx.lineTo(w - padR, py); ctx.stroke();
+    ctx.fillText(v.toFixed(0), 2, py + 3);
+  }
+  for (let s = 0; s <= windowSec; s += Math.max(1, Math.round(windowSec / 10))) {
+    const tv = tNow - s * 1000;
+    const px = xPix(tv);
+    ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, h - padB); ctx.stroke();
+    ctx.fillText('-' + s + 's', px - 8, h - 4);
+  }
+
+  function plotLine(xs, ys, color, dashed) {
+    if (xs.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.6;
+    ctx.setLineDash(dashed ? [5, 4] : []);
+    for (let i = 0; i < xs.length; i++) {
+      const px = xPix(xs[i]), py = yPix(ys[i]);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  plotLine(t, spL, accent, true);
+  plotLine(t, measL, accent, false);
+  plotLine(t, spR, accent2, true);
+  plotLine(t, measR, accent2, false);
+}
+
+function drawPwmChart() {
+  const canvas = $('chartPwm');
+  const { ctx, w, h } = setupCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+
+  const windowSec = parseFloat($('windowSec').value);
+  const tNow = buf.t.length ? buf.t[buf.t.length - 1] : 0;
+  const tMin = tNow - windowSec * 1000;
+  let i0 = 0;
+  for (let i = buf.t.length - 1; i >= 0; i--) { if (buf.t[i] < tMin) { i0 = i + 1; break; } }
+  const t = buf.t.slice(i0), pwmL = buf.pwmL.slice(i0), pwmR = buf.pwmR.slice(i0);
+
+  const border = themeColor('--border'), muted = themeColor('--muted');
+  const accent = themeColor('--accent'), accent2 = themeColor('--accent2');
+  const padL = 42, padR = 8, padT = 6, padB = 6;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const yMin = -255, yMax = 255;
+
+  function xPix(tv) { return padL + ((tv - tMin) / (windowSec * 1000)) * plotW; }
+  function yPix(v) { return padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH; }
+
+  ctx.strokeStyle = border; ctx.fillStyle = muted; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  [-255, 0, 255].forEach((v) => {
+    const py = yPix(v);
+    ctx.beginPath(); ctx.moveTo(padL, py); ctx.lineTo(w - padR, py); ctx.stroke();
+    ctx.fillText(String(v), 2, py + 3);
+  });
+
+  function plotLine(xs, ys, color) {
+    if (xs.length < 2) return;
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.4;
+    for (let i = 0; i < xs.length; i++) {
+      const px = xPix(xs[i]), py = yPix(ys[i]);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  plotLine(t, pwmL, accent);
+  plotLine(t, pwmR, accent2);
+}
+
+function renderLoop() {
+  drawRpmChart();
+  drawPwmChart();
+  requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
+window.addEventListener('resize', () => {}); // canvases resize on next render tick automatically
+
+window.addEventListener('beforeunload', () => { if (connected) disconnectSerial(); });
+</script>
+</body>
+</html>

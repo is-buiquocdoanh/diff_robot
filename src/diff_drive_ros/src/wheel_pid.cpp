@@ -11,6 +11,11 @@ void WheelPID::setGains(float kp, float ki, float kd) {
   kd_ = kd;
 }
 
+void WheelPID::setOutputLimits(float output_min, float output_max) {
+  output_min_ = output_min;
+  output_max_ = output_max;
+}
+
 void WheelPID::reset() {
   integral_ = 0.0f;
   prev_error_ = 0.0f;

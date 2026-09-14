@@ -6,7 +6,9 @@ kiến trúc driver của dự án mecanum trước đó.
 ## Cấu trúc
 
 - `src/diff_drive_ros` — firmware ESP32 (PlatformIO): đọc frame lệnh từ ROS qua Serial/UART2,
-  điều khiển động cơ qua BTS7960, đọc encoder qua PCNT. Xem `src/diff_drive_ros/README.md`.
+  điều khiển động cơ qua BTS7960, đọc encoder qua PCNT, PID tốc độ tùy chọn (tune
+  trực tiếp qua `tools/web/pid_tuner.html`, không cần firmware riêng). Xem
+  `src/diff_drive_ros/README.md`.
 - `src/a3_driver` — package ROS2:
   - `kinematic.py`: subscribe `/cmd_vel`, tính động học vi sai 2 bánh, publish `Velquery`.
   - `serial_bridge_node.py`: node duy nhất dùng chung 1 cổng USB cho cả 2 chiều —

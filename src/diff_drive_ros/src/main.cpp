@@ -9,8 +9,8 @@
 #include <utility/imumaths.h>
 
 // Encoder pins (same as your original configuration)
-#define ENC_LEFT_FRONT_A 4
-#define ENC_LEFT_FRONT_B 15
+#define ENC_LEFT_FRONT_A 15
+#define ENC_LEFT_FRONT_B 4
 
 #define ENC_RIGHT_FRONT_A 23
 #define ENC_RIGHT_FRONT_B 22
@@ -31,11 +31,20 @@ const int CH_R_B = 3;
 volatile int16_t tickLeft = 0;
 volatile int16_t tickRight = 0;
 
-// Encoder / gearbox parameters (adjust if different)
-const int ENCODER_PULSES_PER_REV = 13;
-const int QUAD_FACTOR = 4;
-const int GEARBOX_RATIO = 38;
-const int TICKS_PER_REV = ENCODER_PULSES_PER_REV * QUAD_FACTOR * GEARBOX_RATIO; // e.g. 1976
+// Encoder / gearbox parameters
+// setupPCNT() chỉ dùng 1 channel PCNT với pulse_gpio=A, đếm cả 2 cạnh lên/
+// xuống của riêng kênh A (hướng lấy từ mức của B) - tức đếm kiểu 2x, KHÔNG
+// phải quadrature 4x thật (4x cần 2 channel PCNT, mỗi channel nhận 1 chân
+// làm pulse). Trước đây để nhầm hằng số này = 4 (đặt tên QUAD_FACTOR) +
+// GEARBOX_RATIO=38 khiến
+// TICKS_PER_REV bị tính gấp ~4 lần giá trị đúng -> mọi RPM main.cpp tự đo
+// (debug log lẫn phản hồi PID) đọc ra chỉ bằng 1/4 giá trị thật. Đã xác nhận
+// GEARBOX_RATIO=19.2 bằng code test riêng (đếm bằng ngắt CHANGE trên A,
+// cùng kiểu 2x) cho RPM đúng ~320-325 ở PWM=255, khớp với RPM_MAX bên dưới.
+const float ENCODER_PULSES_PER_REV = 13.0f;
+const float EDGE_COUNT = 2.0f;
+const float GEARBOX_RATIO = 19.2f;
+const float TICKS_PER_REV = ENCODER_PULSES_PER_REV * EDGE_COUNT * GEARBOX_RATIO; // 499.2
 
 // Timing
 const unsigned long PRINT_INTERVAL = 500; // ms
@@ -54,7 +63,7 @@ const int PWM_RES = 8; // 8-bit
 // true : dùng thêm PID bù dựa trên RPM đo từ encoder. Để tránh Kp/Ki/Kd chỉnh
 //        sai làm hỏng cả hệ, PID KHÔNG thay thế hoàn toàn phần tuyến tính -
 //        nó chỉ được "sửa" PWM feedforward trong khoảng +-PID_TRIM_LIMIT.
-const bool ENABLE_PID = true;
+const bool ENABLE_PID = false;
 
 // RPM_MAX phải khớp với tham số `rpm_max` bên kinematic.py (ROS2): PWM nhận
 // được (0..255) được quy đổi ngược thành RPM mục tiêu theo tỉ lệ này để làm
@@ -72,9 +81,13 @@ const float PID_TRIM_LIMIT = 80.0f;
 // định (RPM không về đúng setpoint dù đã chờ ổn định); chỉ thêm Kd nếu thấy
 // dao động cần giảm damping (Kd rất nhạy nhiễu vì RPM đo từ encoder có nhiễu
 // rời rạc, nên để 0 nếu không thật sự cần).
-const float PID_KP = 0.6f;
-const float PID_KI = 0.8f;
-const float PID_KD = 0.0f;
+// Ki=0.8 trước đó gây rung/giật (đặc biệt bánh trái) sau khi fix bug RPM đọc
+// thấp ~1/4 giá trị thật (xem mục 10 README) - measured RPM giờ lớn hơn ~4
+// lần cho cùng 1 chuyển động thật, khiến Kp/Ki cũ phản ứng mạnh hơn ~4 lần so
+// với dự tính. Hạ về lại bước 1 của quy trình tune: CHỈ Kp, Ki=Kd=0.
+const float PID_KP = 0.7900f;
+const float PID_KI = 0.8813f;
+const float PID_KD = 0.0002f;
 
 const unsigned long PID_INTERVAL_MS = 20; // 50Hz, độc lập với PRINT_INTERVAL
 
@@ -89,6 +102,20 @@ int16_t pidPrevTickRight = 0;
 // Nhánh không-PID dùng để áp thẳng như cũ; nhánh PID dùng làm setpoint.
 float targetLeftSigned = 0.0f;
 float targetRightSigned = 0.0f;
+
+// ==================== Tune PID qua Serial (gộp từ project diff_tune_PID) ====
+// Trước đây phải nạp firmware riêng (diff_tune_PID) để tune bằng web tool
+// rồi chép Kp/Ki/Kd qua tay - giờ dùng chung 1 firmware, bật/tắt bằng lệnh
+// ASCII "T,1"/"T,0" qua Serial. Giao thức giống hệt diff_tune_PID nên cùng
+// 1 web tool (tools/web/pid_tuner.html) dùng được thẳng, không cần đổi gì.
+// Mặc định TẮT (production) - phải chủ động gửi "T,1" mới vào chế độ tune;
+// nhớ dừng serial_bridge_node.py/bringup trước (điều kiện y hệt lệnh L/R/S/D).
+bool tuningMode = false;
+float setpointLeftTune = 0.0f;   // RPM có dấu, đặt qua lệnh "V,<left>,<right>"
+float setpointRightTune = 0.0f;
+unsigned long lastTuneCmdMillis = 0;
+const unsigned long TUNE_CMD_TIMEOUT_MS = 500;
+const float TUNE_RPM_LIMIT = 350.0f;
 
 // IMU (BNO055, I2C). GPIO22 is already used by ENC_RIGHT_FRONT_B, so the I2C
 // bus is remapped away from the ESP32 default pins (21/22) to avoid conflict.
@@ -188,6 +215,32 @@ void signedToDirPwm(float value, int &dir, int &pwm) {
   }
 }
 
+void applyTuneStop() {
+  setpointLeftTune = 0.0f;
+  setpointRightTune = 0.0f;
+  leftPid.reset();
+  rightPid.reset();
+  set_bts7960_pwm(CH_L_A, CH_L_B, 0, 0);
+  set_bts7960_pwm(CH_R_A, CH_R_B, 0, 0);
+}
+
+void setTuningMode(bool enable) {
+  tuningMode = enable;
+  lastTuneCmdMillis = millis();
+  applyTuneStop();
+  if (enable) {
+    // Full-authority: PID tính thẳng PWM (-255..255), không cộng feedforward
+    // - y hệt kiến trúc diff_tune_PID để bộ số tune ra dùng lại được ngay.
+    leftPid.setOutputLimits(-255.0f, 255.0f);
+    rightPid.setOutputLimits(-255.0f, 255.0f);
+    Serial.println("OK,T,1");
+  } else {
+    leftPid.setOutputLimits(-PID_TRIM_LIMIT, PID_TRIM_LIMIT);
+    rightPid.setOutputLimits(-PID_TRIM_LIMIT, PID_TRIM_LIMIT);
+    Serial.println("OK,T,0");
+  }
+}
+
 // Use Serial for debug and Serial2 for Raspi cmd_vel (CAN-serial protocol)
 // Default Serial2 pins can be set below if needed
 #define RXD2 16
@@ -237,7 +290,7 @@ void setup() {
   ledcWrite(CH_R_B, 0);
 
   Serial.println("BTS7960 motor test ready.");
-  Serial.println("Commands:\n  L <pwm 0-255> <dir 0|1|2>   - set left motor\n  R <pwm> <dir> - set right motor\n  S - stop both");
+  Serial.println("Commands:\n  L <pwm 0-255> <dir 0|1|2>   - set left motor\n  R <pwm> <dir> - set right motor\n  S - stop both\n  T,<0|1> - bat/tat che do tune PID (web tool)\n  K,<kp>,<ki>,<kd> - set PID gains\n  V,<left_rpm>,<right_rpm> - set setpoint khi tuningMode");
 
   // IMU init: thử 0x29 trước, fallback sang 0x28 nếu không thấy
   Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN);
@@ -287,7 +340,7 @@ void loop() {
     targetLeftSigned = dirPwmToSigned(lf_dir, lf_pwm);
     targetRightSigned = dirPwmToSigned(rf_dir, rf_pwm);
 
-    if (!ENABLE_PID) {
+    if (!tuningMode && !ENABLE_PID) {
       // Hành vi cũ giữ nguyên y hệt: áp PWM nhận được thẳng vào motor ngay
       // khi có packet, không qua PID.
       set_bts7960_pwm(CH_L_A, CH_L_B, lf_pwm, lf_dir);
@@ -295,10 +348,11 @@ void loop() {
     }
   }
 
-  // Vòng PID tốc độ (chỉ chạy khi ENABLE_PID = true), tách khỏi nhịp nhận
-  // packet để không phụ thuộc lúc nào Pi gửi lệnh - luôn bám theo
-  // targetLeft/RightSigned mới nhất bằng RPM đo thực tế từ encoder.
-  if (ENABLE_PID) {
+  // Vòng PID tốc độ 50Hz, tách khỏi nhịp nhận packet để không phụ thuộc lúc
+  // nào Pi gửi lệnh. tuningMode (điều khiển qua lệnh K/V/S/T từ web tool) và
+  // ENABLE_PID (PID "trim" sản xuất) dùng chung 1 timer/1 lần đo RPM nhưng
+  // không bao giờ chạy cùng lúc - tuningMode luôn được ưu tiên.
+  if (tuningMode || ENABLE_PID) {
     unsigned long nowPid = millis();
     if (nowPid - lastPidMillis >= PID_INTERVAL_MS) {
       float dtPid = (nowPid - lastPidMillis) / 1000.0f;
@@ -317,38 +371,61 @@ void loop() {
         float measuredRpmLeft  = ((float)deltaL / (float)TICKS_PER_REV) * (60.0f / dtPid);
         float measuredRpmRight = ((float)deltaR / (float)TICKS_PER_REV) * (60.0f / dtPid);
 
-        float setpointRpmLeft  = (targetLeftSigned  / 255.0f) * RPM_MAX;
-        float setpointRpmRight = (targetRightSigned / 255.0f) * RPM_MAX;
+        if (tuningMode) {
+          // An toàn: mất kết nối web tool (không K/V/S/T nào tới) -> dừng.
+          if (millis() - lastTuneCmdMillis > TUNE_CMD_TIMEOUT_MS) {
+            applyTuneStop();
+          }
 
-        // Feedforward tuyến tính y hệt công thức PWM Pi đã tính (rpm_to_pwm
-        // bên kinematic.py), PID chỉ cộng thêm phần trim để bù sai số/vùng
-        // chết của motor - xem giải thích ở khai báo PID_TRIM_LIMIT.
-        float feedforwardLeft  = targetLeftSigned;
-        float feedforwardRight = targetRightSigned;
+          float outLeft  = leftPid.compute(setpointLeftTune,  measuredRpmLeft,  dtPid);
+          float outRight = rightPid.compute(setpointRightTune, measuredRpmRight, dtPid);
 
-        float trimLeft  = leftPid.compute(setpointRpmLeft,  measuredRpmLeft,  dtPid);
-        float trimRight = rightPid.compute(setpointRpmRight, measuredRpmRight, dtPid);
+          int dirL, pwmL, dirR, pwmR;
+          signedToDirPwm(outLeft, dirL, pwmL);
+          signedToDirPwm(outRight, dirR, pwmR);
+          set_bts7960_pwm(CH_L_A, CH_L_B, pwmL, dirL);
+          set_bts7960_pwm(CH_R_A, CH_R_B, pwmR, dirR);
 
-        float outLeft  = constrain(feedforwardLeft  + trimLeft,  -255.0f, 255.0f);
-        float outRight = constrain(feedforwardRight + trimRight, -255.0f, 255.0f);
+          long pwmSignedL = (dirL == 2) ? -(long)pwmL : (long)pwmL;
+          long pwmSignedR = (dirR == 2) ? -(long)pwmR : (long)pwmR;
+          // D,<t_ms>,<sp_left>,<meas_left>,<pwm_left>,<sp_right>,<meas_right>,<pwm_right>
+          Serial.printf("D,%lu,%.2f,%.2f,%ld,%.2f,%.2f,%ld\n",
+                        nowPid, setpointLeftTune, measuredRpmLeft, pwmSignedL,
+                        setpointRightTune, measuredRpmRight, pwmSignedR);
+        } else {
+          float setpointRpmLeft  = (targetLeftSigned  / 255.0f) * RPM_MAX;
+          float setpointRpmRight = (targetRightSigned / 255.0f) * RPM_MAX;
 
-        int dirL, pwmL, dirR, pwmR;
-        signedToDirPwm(outLeft, dirL, pwmL);
-        signedToDirPwm(outRight, dirR, pwmR);
+          // Feedforward tuyến tính y hệt công thức PWM Pi đã tính (rpm_to_pwm
+          // bên kinematic.py), PID chỉ cộng thêm phần trim để bù sai số/vùng
+          // chết của motor - xem giải thích ở khai báo PID_TRIM_LIMIT.
+          float feedforwardLeft  = targetLeftSigned;
+          float feedforwardRight = targetRightSigned;
 
-        // Setpoint = 0 (dừng): ép dừng hẳn, không để PID "rung" quanh 0 do
-        // nhiễu đếm encoder, đồng thời xóa tích phân để không giật khi chạy lại.
-        if (fabsf(targetLeftSigned) < 0.5f) {
-          dirL = 0; pwmL = 0;
-          leftPid.reset();
+          float trimLeft  = leftPid.compute(setpointRpmLeft,  measuredRpmLeft,  dtPid);
+          float trimRight = rightPid.compute(setpointRpmRight, measuredRpmRight, dtPid);
+
+          float outLeft  = constrain(feedforwardLeft  + trimLeft,  -255.0f, 255.0f);
+          float outRight = constrain(feedforwardRight + trimRight, -255.0f, 255.0f);
+
+          int dirL, pwmL, dirR, pwmR;
+          signedToDirPwm(outLeft, dirL, pwmL);
+          signedToDirPwm(outRight, dirR, pwmR);
+
+          // Setpoint = 0 (dừng): ép dừng hẳn, không để PID "rung" quanh 0 do
+          // nhiễu đếm encoder, đồng thời xóa tích phân để không giật khi chạy lại.
+          if (fabsf(targetLeftSigned) < 0.5f) {
+            dirL = 0; pwmL = 0;
+            leftPid.reset();
+          }
+          if (fabsf(targetRightSigned) < 0.5f) {
+            dirR = 0; pwmR = 0;
+            rightPid.reset();
+          }
+
+          set_bts7960_pwm(CH_L_A, CH_L_B, pwmL, dirL);
+          set_bts7960_pwm(CH_R_A, CH_R_B, pwmR, dirR);
         }
-        if (fabsf(targetRightSigned) < 0.5f) {
-          dirR = 0; pwmR = 0;
-          rightPid.reset();
-        }
-
-        set_bts7960_pwm(CH_L_A, CH_L_B, pwmL, dirL);
-        set_bts7960_pwm(CH_R_A, CH_R_B, pwmR, dirR);
       }
     }
   }
@@ -363,26 +440,30 @@ void loop() {
     }
   }
 
-  // Safety: if no binary packet received for PACKET_TIMEOUT_MS, stop motors
-  if (!got) {
-    if (millis() - lastPacketMillis > PACKET_TIMEOUT_MS) {
-      // only call stop once per timeout occurrence (set motors to zero)
-      static bool stopped = false;
-      if (!stopped) {
-        set_bts7960_pwm(CH_L_A, CH_L_B, 0, 0);
-        set_bts7960_pwm(CH_R_A, CH_R_B, 0, 0);
-        targetLeftSigned = 0.0f;
-        targetRightSigned = 0.0f;
-        leftPid.reset();
-        rightPid.reset();
-        Serial.println("[SAFETY] No packet timeout - motors stopped");
-        stopped = true;
+  // Safety: if no binary packet received for PACKET_TIMEOUT_MS, stop motors.
+  // Bỏ qua hẳn khi đang tuningMode - lúc đó không cần (và thường không có)
+  // packet ROS nào tới, tuningMode có timeout an toàn riêng (TUNE_CMD_TIMEOUT_MS).
+  if (!tuningMode) {
+    if (!got) {
+      if (millis() - lastPacketMillis > PACKET_TIMEOUT_MS) {
+        // only call stop once per timeout occurrence (set motors to zero)
+        static bool stopped = false;
+        if (!stopped) {
+          set_bts7960_pwm(CH_L_A, CH_L_B, 0, 0);
+          set_bts7960_pwm(CH_R_A, CH_R_B, 0, 0);
+          targetLeftSigned = 0.0f;
+          targetRightSigned = 0.0f;
+          leftPid.reset();
+          rightPid.reset();
+          Serial.println("[SAFETY] No packet timeout - motors stopped");
+          stopped = true;
+        }
       }
+    } else {
+      // reset stopped flag when we receive a packet
+      static bool stopped = false;
+      stopped = false;
     }
-  } else {
-    // reset stopped flag when we receive a packet
-    static bool stopped = false;
-    stopped = false;
   }
 
   // serial command handling (ASCII) - only if no binary packet consumed
@@ -435,8 +516,8 @@ void loop() {
               Serial.printf("Set RIGHT pwm=%d dir=%d\n", pwm, dir);
             }
           } else if (cmd == 'S') {
-            set_bts7960_pwm(CH_L_A, CH_L_B, 0, 0);
-            set_bts7960_pwm(CH_R_A, CH_R_B, 0, 0);
+            applyTuneStop(); // dừng + reset PID; vô hại khi không ở tuningMode
+            lastTuneCmdMillis = millis();
             Serial.println("Stopped both motors");
           } else if (cmd == 'D') { // DBG
             int la_state = digitalRead(ENC_LEFT_FRONT_A);
@@ -449,6 +530,37 @@ void loop() {
             int duty_RB = ledcRead(CH_R_B);
             Serial.printf("DBG PIN states: LA=%d LB=%d | RA=%d RB=%d\n", la_state, lb_state, ra_state, rb_state);
             Serial.printf("DBG LEDC duty: LA=%d LB=%d | RA=%d RB=%d\n", duty_LA, duty_LB, duty_RA, duty_RB);
+          } else if (cmd == 'T') {
+            // T,1 bật chế độ tune (PID full-authority, điều khiển bằng K/V/S
+            // từ web tool); T,0 tắt, quay lại chế độ sản xuất bình thường.
+            int mode = 0;
+            if (sscanf(cmdBuf + 1, ",%d", &mode) == 1) {
+              setTuningMode(mode != 0);
+            } else {
+              Serial.println("ERR,T,expect T,<0|1>");
+            }
+          } else if (cmd == 'K') {
+            // K,<kp>,<ki>,<kd> - set gains PID cho cả 2 bánh (dùng cho cả
+            // chế độ tune lẫn PID trim sản xuất).
+            float kp, ki, kd;
+            if (sscanf(cmdBuf + 1, ",%f,%f,%f", &kp, &ki, &kd) == 3) {
+              leftPid.setGains(kp, ki, kd);
+              rightPid.setGains(kp, ki, kd);
+              Serial.printf("OK,K,%.4f,%.4f,%.4f\n", kp, ki, kd);
+            } else {
+              Serial.println("ERR,K,expect K,<kp>,<ki>,<kd>");
+            }
+          } else if (cmd == 'V') {
+            // V,<left_rpm>,<right_rpm> - chỉ có tác dụng khi tuningMode=true
+            // (setpoint sản xuất vẫn lấy từ packet ROS như bình thường).
+            float l, r;
+            if (sscanf(cmdBuf + 1, ",%f,%f", &l, &r) == 2) {
+              setpointLeftTune = constrain(l, -TUNE_RPM_LIMIT, TUNE_RPM_LIMIT);
+              setpointRightTune = constrain(r, -TUNE_RPM_LIMIT, TUNE_RPM_LIMIT);
+              lastTuneCmdMillis = millis();
+            } else {
+              Serial.println("ERR,V,expect V,<left_rpm>,<right_rpm>");
+            }
           } else {
             Serial.println("Unknown command");
           }

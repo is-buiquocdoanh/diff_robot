@@ -11,6 +11,10 @@ public:
 
   void setGains(float kp, float ki, float kd);
 
+  // Đổi biên độ output lúc chạy (vd chuyển giữa PID "trim" +-PID_TRIM_LIMIT
+  // ở chế độ sản xuất và PID "full-authority" +-255 ở chế độ tune qua web).
+  void setOutputLimits(float output_min, float output_max);
+
   // Xóa trạng thái tích phân/đạo hàm - gọi khi dừng xe hoặc chuyển hướng đột
   // ngột, để integral không "nhớ" sai số cũ gây giật khi chạy lại.
   void reset();
