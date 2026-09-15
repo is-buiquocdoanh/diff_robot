@@ -22,7 +22,6 @@
   <exec_depend>dwb_core</exec_depend>
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
   <exec_depend>nav2_mppi_controller</exec_depend>
-  <exec_depend>nav2_simple_commander</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

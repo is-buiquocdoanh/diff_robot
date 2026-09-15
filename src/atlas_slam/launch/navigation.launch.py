@@ -8,7 +8,7 @@ ESP32, EKF, RPLidar...) là tầng riêng chạy trước, xem a3_bringup:
     # Terminal 2: định vị (AMCL) + Nav2
     ros2 launch atlas_slam navigation.launch.py
     # Đặt "2D Pose Estimate" trong RViz để AMCL biết vị trí ban đầu, sau đó
-    # dùng "Nav2 Goal" hoặc gửi goal qua send_goal_and_time.py
+    # dùng "Nav2 Goal" trong RViz để gửi điểm đến
 
 Định vị luôn dùng AMCL (xem launch/localization.launch.py, được include sẵn ở
 dưới) -- map lưu bằng map_saver_cli (.pgm + .yaml, xem maps/README.md).

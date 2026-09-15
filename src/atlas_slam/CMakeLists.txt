@@ -8,9 +8,4 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(
-  PROGRAMS scripts/send_goal_and_time.py
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 ament_package()
