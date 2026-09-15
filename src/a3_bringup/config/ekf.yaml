@@ -32,12 +32,18 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # /imu/data: chỉ tin yaw (đã fusion sẵn trên chip BNO055) + vận tốc góc
-    # đo trực tiếp - không dùng gia tốc dài (accel) để tránh nhiễu không cần
-    # thiết trong lúc chưa thật sự cần.
+    # /imu/data: CHỈ tin vyaw (tốc độ quay, đo trực tiếp bằng gyro) -- KHÔNG fuse yaw
+    # tuyệt đối (orientation) nữa. Yaw tuyệt đối của BNO055 cần magnetometer đã
+    # calib tốt, mà mag rất dễ bị nhiễu bởi dòng điện qua dây BTS7960 ngay khi
+    # động cơ chạy tải thật (khác hẳn lúc đứng yên/nhấc bổng test) -- 1 lần đọc
+    # yaw sai vẫn lọt qua (không phải NaN nên qua được validation ở
+    # serial_bridge_node) vẫn đủ kéo lệch state của EKF. Không dùng accel (ax,ay,az)
+    # vì chưa thật sự cần trong lúc này.
+    # Đánh đổi: yaw sẽ trôi dần (drift) giữa các lần AMCL sửa lại bằng map -- chấp
+    # nhận được vì navigation.launch.py đã dùng AMCL làm nguồn heading tuyệt đối.
     imu0: /imu/data
     imu0_config: [false, false, false,
-                  false, false, true,
+                  false, false, false,
                   false, false, false,
                   false, false, true,
                   false, false, false]
@@ -47,10 +53,11 @@ ekf_filter_node:
     imu0_remove_gravitational_acceleration: true
 
     # Loại bỏ phép đo "nhảy" đột ngột: nếu 1 giá trị mới lệch khỏi state đang
-    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật
-    # theo (chống nhiễu tức thời, vd nhiễu từ trường lên magnetometer BNO055
-    # khi ở gần BTS7960/dây động cơ). Đơn vị: rad (pose), rad/s hoặc m/s (twist).
-    imu0_pose_rejection_threshold: 0.8    # ~45 độ
+    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật theo
+    # (chống nhiễu tức thời). imu0_pose_rejection_threshold hiện không có tác dụng
+    # (imu0_config không còn fuse field pose/yaw nào) -- giữ lại phòng khi bật lại
+    # yaw tuyệt đối sau này. Đơn vị: rad/s hoặc m/s (twist).
+    imu0_pose_rejection_threshold: 0.8    # ~45 độ (không dùng, xem trên)
     imu0_twist_rejection_threshold: 1.5   # rad/s
     odom0_twist_rejection_threshold: 1.0  # m/s - chủ yếu chặn giá trị rác/hỏng
 

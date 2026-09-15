@@ -15,6 +15,7 @@ là nhị phân, ESP32 -> Pi luôn là text theo dòng.
 CHỈ được có một node mở serial_port này. Nếu 2 process cùng mở một device thì
 byte đọc về sẽ bị chia ngẫu nhiên giữa 2 process và hỏng cả 2 luồng.
 """
+import math
 import sys
 import time
 
@@ -165,6 +166,22 @@ class SerialBridgeNode(LifecycleNode):
              cal_sys, cal_gyro, cal_accel, cal_mag) = (float(f) for f in fields[1:])
         except ValueError:
             self.get_logger().warn(f'[IMU] Failed to parse line: {line}')
+            return
+
+        # float() chấp nhận "nan"/"inf" mà không raise -- dây serial nhiễu (dễ xảy ra
+        # khi động cơ kéo tải thật, gần dây BTS7960) có thể lọt qua parse ở trên thành
+        # NaN/Inf hoặc quaternion vô nghĩa. Khác với ValueError, NaN/Inf KHÔNG bị EKF tự
+        # phát hiện (so sánh với NaN luôn ra False) -- 1 mẫu lọt qua là đủ đầu độc vĩnh
+        # viễn state của EKF (đứng yên từ đó, không tự phục hồi). Chặn ở nguồn tại đây.
+        values = (qw, qx, qy, qz, gx, gy, gz, ax, ay, az, cal_sys, cal_gyro, cal_accel, cal_mag)
+        if not all(math.isfinite(v) for v in values):
+            self.get_logger().warn(f'[IMU] Non-finite value (NaN/Inf), dropping line: {line}')
+            return
+
+        quat_norm = math.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+        if not math.isclose(quat_norm, 1.0, abs_tol=0.1):
+            self.get_logger().warn(
+                f'[IMU] Quaternion norm {quat_norm:.3f} far from 1.0, dropping line: {line}')
             return
 
         msg = Imu()
