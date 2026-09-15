@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """ROS2 node: quy đổi /cmd_vel thành nav_msgs/Odometry (CHỈ vận tốc dài vx),
-làm nguồn "wheel odometry" giả cho robot_localization EKF (xem ekf.launch.py).
+làm nguồn "wheel odometry" giả cho robot_localization EKF (xem odom.launch.py).
 
 Driver ESP32 hiện chưa có encoder feedback + PID đáng tin cậy, nên chưa có
 wheel odometry thật. Node này chỉ đứng vai "cảm biến vx" (coi robot bám sát
