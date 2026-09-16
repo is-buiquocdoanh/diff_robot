@@ -1,9 +1,15 @@
-"""Tạo /odom + TF odom -> base_footprint bằng EKF (robot_localization),
-fusion /wheel/odom (vx suy từ /cmd_vel) với /imu/data (yaw + vyaw từ BNO055).
+"""Tạo /odom + TF odom -> base_footprint bằng EKF (robot_localization), fusion
+/wheel/odom (vx suy từ /cmd_vel) với /odom_rf2o (x,y,yaw + vx,vyaw, đo bằng so
+khớp scan liên tiếp -- xem package rf2o_laser_odometry).
+
+TẠM THỜI không dùng /imu/data (BNO055) -- xem comment đầu config/ekf.yaml.
 
 Trước đây 1 node tự tích phân trực tiếp (odom_publisher_node.py) ghi đè yaw
-thô từ IMU mỗi tick, gây rung/giật khi IMU nhiễu. Nay tách làm 2:
+thô từ IMU mỗi tick, gây rung/giật khi IMU nhiễu. Nay tách làm 3:
   - wheel_odom_node.py (a3_driver): chỉ publish vx lên /wheel/odom.
+  - rf2o_laser_odometry_node (rf2o_laser_odometry): so khớp 2 scan liên tiếp
+    trên /scan, publish x,y,yaw + vx,vyaw lên /odom_rf2o -- không phụ thuộc
+    encoder/IMU nên không bị ảnh hưởng bởi nhiễu từ trường/chưa hiệu chuẩn.
   - ekf_node (robot_localization, config/ekf.yaml): lọc mượt theo covariance
     rồi mới ra /odom + TF, publish thẳng trong file này (không qua launch
     riêng -- ekf_node chỉ dùng đúng ở đây, tách file khác chỉ thêm 1 lớp
@@ -49,7 +55,27 @@ def generate_launch_description():
         }],
     )
 
-    # /wheel/odom + /imu/data -> /odom + TF (xem config/ekf.yaml). ekf_node mặc
+    # /scan -> /odom_rf2o (x,y,yaw + vx,vyaw, xem package rf2o_laser_odometry).
+    # publish_tf: False -- EKF bên dưới là node DUY NHẤT publish TF odom ->
+    # base_footprint (publish_tf: true trong ekf.yaml), 2 node cùng publish 1
+    # TF sẽ xung đột/nhảy.
+    rf2o_node = Node(
+        package='rf2o_laser_odometry',
+        executable='rf2o_laser_odometry_node',
+        name='rf2o_laser_odometry',
+        output='screen',
+        parameters=[{
+            'laser_scan_topic': '/scan',
+            'odom_topic': '/odom_rf2o',
+            'publish_tf': False,
+            'base_frame_id': 'base_footprint',
+            'odom_frame_id': 'odom',
+            'init_pose_from_topic': '',
+            'freq': 30.0,
+        }],
+    )
+
+    # /wheel/odom + /odom_rf2o -> /odom + TF (xem config/ekf.yaml). ekf_node mặc
     # định publish odometry đã lọc ra topic `odometry/filtered` -- remap về
     # /odom cho khớp với những gì slam_toolbox/nav2 mong đợi, đồng thời tự
     # broadcast TF odom -> base_footprint (publish_tf: true trong ekf.yaml).
@@ -69,5 +95,6 @@ def generate_launch_description():
         cmd_vel_timeout_arg,
 
         wheel_odom_node,
+        rf2o_node,
         ekf_node,
     ])

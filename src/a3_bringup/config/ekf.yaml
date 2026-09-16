@@ -1,9 +1,17 @@
-# EKF (robot_localization) fusion /wheel/odom (chỉ vx, từ cmd_vel) + /imu/data
-# (yaw + vyaw, từ BNO055) -> /odom + TF odom -> base_footprint.
+# EKF (robot_localization) fusion /wheel/odom (chỉ vx, từ cmd_vel) + /odom_rf2o
+# (x, y, yaw + vx, vyaw, từ rf2o_laser_odometry -- so khớp scan liên tiếp)
+# -> /odom + TF odom -> base_footprint.
 #
-# Không dùng thẳng cmd_vel/imu ghi đè odom mỗi tick như node cũ (gây rung khi
-# IMU nhiễu) - EKF lọc theo covariance nên mượt hơn nhiều, đồng thời tự tích
-# phân vị trí từ vận tốc thay vì tin tưởng tuyệt đối 1 nguồn.
+# TẠM THỜI bỏ qua /imu/data (BNO055) -- xem lịch sử debug: robot đứng yên trên
+# TF khi chạy thật dù cmd_vel/imu riêng lẻ đều có dữ liệu, nghi ngờ IMU (mag
+# nhiễu bởi BTS7960 khi có tải thật) nhưng chưa xác nhận được dứt điểm. Dùng
+# rf2o (đo trực tiếp từ /scan, không phụ thuộc mag/encoder) làm nguồn chính
+# thay thế trong lúc điều tra tiếp. Có thể bật lại imu0 sau khi rf2o hoạt động
+# ổn định, để dự phòng/tăng độ chính xác góc quay.
+#
+# Không dùng thẳng cmd_vel ghi đè odom mỗi tick như node cũ (gây rung khi IMU
+# nhiễu) - EKF lọc theo covariance nên mượt hơn nhiều, đồng thời tự tích phân
+# vị trí từ vận tốc thay vì tin tưởng tuyệt đối 1 nguồn.
 #
 # Thứ tự 15 phần tử trong *_config: [x, y, z, roll, pitch, yaw,
 #                                     vx, vy, vz, vroll, vpitch, vyaw,
@@ -32,33 +40,44 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # /imu/data: CHỈ tin vyaw (tốc độ quay, đo trực tiếp bằng gyro) -- KHÔNG fuse yaw
-    # tuyệt đối (orientation) nữa. Yaw tuyệt đối của BNO055 cần magnetometer đã
-    # calib tốt, mà mag rất dễ bị nhiễu bởi dòng điện qua dây BTS7960 ngay khi
-    # động cơ chạy tải thật (khác hẳn lúc đứng yên/nhấc bổng test) -- 1 lần đọc
-    # yaw sai vẫn lọt qua (không phải NaN nên qua được validation ở
-    # serial_bridge_node) vẫn đủ kéo lệch state của EKF. Không dùng accel (ax,ay,az)
-    # vì chưa thật sự cần trong lúc này.
-    # Đánh đổi: yaw sẽ trôi dần (drift) giữa các lần AMCL sửa lại bằng map -- chấp
-    # nhận được vì navigation.launch.py đã dùng AMCL làm nguồn heading tuyệt đối.
-    imu0: /imu/data
-    imu0_config: [false, false, false,
-                  false, false, false,
-                  false, false, false,
-                  false, false, true,
-                  false, false, false]
-    imu0_differential: false
-    imu0_relative: false
-    imu0_queue_size: 10
-    imu0_remove_gravitational_acceleration: true
+    # /odom_rf2o: x, y, yaw (pose) + vx, vyaw (twist) -- đo trực tiếp từ so khớp
+    # 2 scan liên tiếp (rf2o_laser_odometry), không phụ thuộc encoder/mag nên
+    # không bị ảnh hưởng bởi nhiễu từ trường của BTS7960 hay việc chưa hiệu
+    # chuẩn IMU. Covariance do rf2o_laser_odometry publish (đã vá thêm ở
+    # CLaserOdometry2DNode.cpp, xem package rf2o_laser_odometry) là giá trị cố
+    # định ước lượng, không phải tự tính theo từng scan -- nên coi kết quả như
+    # điểm khởi đầu để tinh chỉnh, không phải số liệu tuyệt đối chính xác.
+    odom1: /odom_rf2o
+    odom1_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
+
+    # --- imu0: TẠM TẮT (xem comment đầu file) -- giữ nguyên cấu hình cũ để dễ
+    # bật lại sau khi rf2o chạy ổn định, chỉ cần bỏ comment + đổi imu0_config
+    # dòng yaw (index 5) thành true nếu muốn fuse lại yaw tuyệt đối từ mag.
+    # imu0: /imu/data
+    # imu0_config: [false, false, false,
+    #               false, false, false,
+    #               false, false, false,
+    #               false, false, true,
+    #               false, false, false]
+    # imu0_differential: false
+    # imu0_relative: false
+    # imu0_queue_size: 10
+    # imu0_remove_gravitational_acceleration: true
+    # imu0_pose_rejection_threshold: 0.8    # ~45 độ
+    # imu0_twist_rejection_threshold: 1.5   # rad/s
 
     # Loại bỏ phép đo "nhảy" đột ngột: nếu 1 giá trị mới lệch khỏi state đang
-    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật theo
-    # (chống nhiễu tức thời). imu0_pose_rejection_threshold hiện không có tác dụng
-    # (imu0_config không còn fuse field pose/yaw nào) -- giữ lại phòng khi bật lại
-    # yaw tuyệt đối sau này. Đơn vị: rad/s hoặc m/s (twist).
-    imu0_pose_rejection_threshold: 0.8    # ~45 độ (không dùng, xem trên)
-    imu0_twist_rejection_threshold: 1.5   # rad/s
+    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật
+    # theo (chống nhiễu tức thời/rác). Đơn vị: rad (pose), rad/s hoặc m/s (twist).
+    odom1_pose_rejection_threshold: 0.8    # chặn kết quả rf2o "mất track" đột ngột (Mahalanobis distance)
+    odom1_twist_rejection_threshold: 1.5   # rad/s hoặc m/s
     odom0_twist_rejection_threshold: 1.0  # m/s - chủ yếu chặn giá trị rác/hỏng
 
     # process_noise_covariance: mức "không chắc chắn" nội bộ EKF tự cộng dồn
