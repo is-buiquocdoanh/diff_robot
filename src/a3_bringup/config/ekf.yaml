@@ -1,13 +1,11 @@
-# EKF (robot_localization) fusion /wheel/odom (chỉ vx, từ cmd_vel) + /odom_rf2o
-# (x, y, yaw + vx, vyaw, từ rf2o_laser_odometry -- so khớp scan liên tiếp)
+# EKF (robot_localization) fusion /wheel/odom (vx + vyaw, suy từ cmd_vel)
 # -> /odom + TF odom -> base_footprint.
 #
-# TẠM THỜI bỏ qua /imu/data (BNO055) -- xem lịch sử debug: robot đứng yên trên
-# TF khi chạy thật dù cmd_vel/imu riêng lẻ đều có dữ liệu, nghi ngờ IMU (mag
-# nhiễu bởi BTS7960 khi có tải thật) nhưng chưa xác nhận được dứt điểm. Dùng
-# rf2o (đo trực tiếp từ /scan, không phụ thuộc mag/encoder) làm nguồn chính
-# thay thế trong lúc điều tra tiếp. Có thể bật lại imu0 sau khi rf2o hoạt động
-# ổn định, để dự phòng/tăng độ chính xác góc quay.
+# TẠM THỜI CHỈ dùng /wheel/odom (odom1/rf2o VÀ imu0 đều đang tắt) -- test tin
+# HOÀN TOÀN cmd_vel để xem EKF/TF có chạy đúng khi chỉ 1 nguồn duy nhất không.
+# Nhược điểm khi chỉ dùng odom0: KHÔNG có x,y tuyệt đối (node nguồn không tự
+# tính, chỉ suy vx/vyaw từ lệnh) -- vị trí sẽ trôi theo thời gian, không tự
+# sửa bằng cảm biến thật nào cả cho tới khi bật lại odom1 (rf2o) hoặc imu0.
 #
 # Không dùng thẳng cmd_vel ghi đè odom mỗi tick như node cũ (gây rung khi IMU
 # nhiễu) - EKF lọc theo covariance nên mượt hơn nhiều, đồng thời tự tích phân
@@ -30,9 +28,7 @@ ekf_filter_node:
 
     # /wheel/odom: tin vx VÀ vyaw (coi robot bám sát lệnh cmd_vel), không tin
     # vị trí/hướng tuyệt đối do node nguồn không tự tính - xem wheel_odom_node.py.
-    # vyaw ở đây được set variance thấp hơn vyaw của odom1 (rf2o) -- khi quay tại
-    # chỗ, rf2o (so khớp scan) dễ trôi vì thiếu parallax giữa các điểm quét, nên
-    # ưu tiên tin cmd_vel hơn lúc quay (xem angular_stddev trong wheel_odom_node.py).
+    # Hiện là NGUỒN DUY NHẤT (odom1/imu0 đang tắt, xem comment đầu file).
     odom0: /wheel/odom
     odom0_config: [false, false, false,
                    false, false, false,
@@ -43,22 +39,22 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # /odom_rf2o: x, y, yaw (pose) + vx, vyaw (twist) -- đo trực tiếp từ so khớp
-    # 2 scan liên tiếp (rf2o_laser_odometry), không phụ thuộc encoder/mag nên
-    # không bị ảnh hưởng bởi nhiễu từ trường của BTS7960 hay việc chưa hiệu
-    # chuẩn IMU. Covariance do rf2o_laser_odometry publish (đã vá thêm ở
-    # CLaserOdometry2DNode.cpp, xem package rf2o_laser_odometry) là giá trị cố
-    # định ước lượng, không phải tự tính theo từng scan -- nên coi kết quả như
-    # điểm khởi đầu để tinh chỉnh, không phải số liệu tuyệt đối chính xác.
-    odom1: /odom_rf2o
-    odom1_config: [true,  true,  false,
-                   false, false, true,
-                   true,  false, false,
-                   false, false, true,
-                   false, false, false]
-    odom1_differential: false
-    odom1_relative: false
-    odom1_queue_size: 10
+    # --- odom1 (rf2o): TẠM TẮT ĐỂ TEST -- tin HOÀN TOÀN /wheel/odom (odom0),
+    # xem EKF/TF có chạy đúng khi chỉ có 1 nguồn duy nhất không, trước khi đổ
+    # lỗi tiếp cho rf2o. Bỏ comment lại + xoá comment "TẠM TẮT" trên đây khi
+    # muốn dùng lại rf2o để sửa lỗi vị trí/hướng tuyệt đối (odom0 không tự tính
+    # được x,y, chỉ có vx/vyaw suy từ cmd_vel).
+    # odom1: /odom_rf2o
+    # odom1_config: [true,  true,  false,
+    #                false, false, true,
+    #                true,  false, false,
+    #                false, false, true,
+    #                false, false, false]
+    # odom1_differential: false
+    # odom1_relative: false
+    # odom1_queue_size: 10
+    # odom1_pose_rejection_threshold: 0.8
+    # odom1_twist_rejection_threshold: 1.5
 
     # --- imu0: TẠM TẮT (xem comment đầu file) -- giữ nguyên cấu hình cũ để dễ
     # bật lại sau khi rf2o chạy ổn định, chỉ cần bỏ comment + đổi imu0_config
@@ -79,8 +75,6 @@ ekf_filter_node:
     # Loại bỏ phép đo "nhảy" đột ngột: nếu 1 giá trị mới lệch khỏi state đang
     # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật
     # theo (chống nhiễu tức thời/rác). Đơn vị: rad (pose), rad/s hoặc m/s (twist).
-    odom1_pose_rejection_threshold: 0.8    # chặn kết quả rf2o "mất track" đột ngột (Mahalanobis distance)
-    odom1_twist_rejection_threshold: 1.5   # rad/s hoặc m/s
     odom0_twist_rejection_threshold: 1.0  # m/s - chủ yếu chặn giá trị rác/hỏng
 
     # process_noise_covariance: mức "không chắc chắn" nội bộ EKF tự cộng dồn
