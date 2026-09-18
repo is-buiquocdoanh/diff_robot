@@ -55,10 +55,18 @@
   <xacro:property name="lidar_z" value="${deck2_top_z + lidar_axis_up}"/>
   <!-- Góc xoay của lidar quanh trục đứng. Cả vỏ lidar lẫn hệ trục laser_link
        cùng xoay, đúng như xoay thiết bị thật trên giá đỡ.
-         +pi/2 : trục đỏ X sang trái,  trục xanh lá Y về SAU   (đang dùng)
-         -pi/2 : trục đỏ X sang phải,  trục xanh lá Y về TRƯỚC
-       Chênh nhau đúng 180 độ. -->
-  <xacro:property name="lidar_yaw" value="1.5707963268"/>
+            0   : trục đỏ X ra TRƯỚC,     trục xanh lá Y sang trái
+         +pi/2  : trục đỏ X sang trái,    trục xanh lá Y về SAU
+         -pi/2  : trục đỏ X sang phải,    trục xanh lá Y ra TRƯỚC
+          pi    : trục đỏ X về SAU,       trục xanh lá Y sang phải  (đang dùng)
+       Trước đây để +pi/2 (giả định lúc chưa lắp lidar thật), kiểm chứng lại
+       trên robot thật bằng rf2o (rf2o_laser_odometry) + wheel_odom: lệch nhau
+       đúng 90 độ giữa 2 nguồn khiến robot đi thẳng bị hiển thị "đi ngang" trên
+       RViz (rf2o tính chuyển động trong hệ laser_link rồi xoay sang base_link
+       qua ĐÚNG giá trị lidar_yaw này, sai 90 độ ở đây thì mọi vận tốc tính từ
+       scan cũng bị xoay sai 90 độ theo). Chỉnh về pi mới khớp thực tế: phía
+       trước robot là phía SAU (điểm âm) của trục đỏ X trên laser_link. -->
+  <xacro:property name="lidar_yaw" value="3.1415926536"/>
 
   <!-- ================= Vật liệu hiển thị trong RViz ================= -->
   <material name="a3_grey">   <color rgba="0.72 0.74 0.76 1.0"/></material>

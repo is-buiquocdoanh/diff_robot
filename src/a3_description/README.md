@@ -166,17 +166,23 @@ Lidar đặt **chính giữa sàn tầng 2**, đáy vỏ tì lên mặt sàn:
 `laser_link` nằm đúng trên trục dọc xe (x = 0, y = 0) nên `/scan` đối xứng,
 không cần bù offset khi làm SLAM/navigation.
 
-Lidar được xoay **+90° quanh trục đứng** (`lidar_yaw` trong `common.xacro`):
+Lidar được xoay **180° quanh trục đứng** (`lidar_yaw = 3.1415926536` trong
+`common.xacro`) — giá trị này đã kiểm chứng lại trên robot thật bằng rf2o
+(rf2o_laser_odometry) + wheel_odom, khác với giả định +90° ban đầu lúc chưa
+lắp lidar thật (lệch 90° giữa 2 giá trị này từng khiến robot đi thẳng bị
+rf2o tính ra thành đi ngang, vì rf2o xoay chuyển động đo từ hệ `laser_link`
+sang `base_link` đúng theo giá trị `lidar_yaw`):
 
 | trục `laser_link` | chỉ về |
 |---|---|
-| đỏ X | sang trái xe (+Y) |
-| xanh lá Y | phía sau xe (−X) |
+| đỏ X | phía sau xe (−X) |
+| xanh lá Y | sang phải xe (−Y) |
 | xanh dương Z | lên trên (+Z) |
 
 Cả vỏ lidar lẫn hệ trục cùng xoay, đúng như xoay thiết bị thật trên giá đỡ.
-Đổi `lidar_yaw` sang `-1.5707963268` là xoay ngược đúng 180°: trục đỏ X sang
-phải, trục xanh lá Y về phía trước.
+Đổi `lidar_yaw` sang `0` là trục đỏ X ra trước, xanh lá Y sang trái; sang
+`1.5707963268` (+90°) hoặc `-1.5707963268` (-90°) cho 2 hướng vuông góc còn
+lại — xem bảng chi tiết trong comment tại `common.xacro`.
 
 Khoang này cao 80 mm, lidar cao 53.5 mm → dư 26.5 mm. Cản trở duy nhất trong
 tầm quét là **4 cột nhôm 20×20 mm** ở `(±0.210, ±0.160)` m. Đo trên Gazebo:
