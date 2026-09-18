@@ -1,24 +1,10 @@
-# EKF (robot_localization) fusion /wheel/odom (vx + vyaw, suy từ cmd_vel)
-# -> /odom + TF odom -> base_footprint.
-#
-# TẠM THỜI CHỈ dùng /wheel/odom (odom1/rf2o VÀ imu0 đều đang tắt) -- test tin
-# HOÀN TOÀN cmd_vel để xem EKF/TF có chạy đúng khi chỉ 1 nguồn duy nhất không.
-# Nhược điểm khi chỉ dùng odom0: KHÔNG có x,y tuyệt đối (node nguồn không tự
-# tính, chỉ suy vx/vyaw từ lệnh) -- vị trí sẽ trôi theo thời gian, không tự
-# sửa bằng cảm biến thật nào cả cho tới khi bật lại odom1 (rf2o) hoặc imu0.
-#
-# Không dùng thẳng cmd_vel ghi đè odom mỗi tick như node cũ (gây rung khi IMU
-# nhiễu) - EKF lọc theo covariance nên mượt hơn nhiều, đồng thời tự tích phân
-# vị trí từ vận tốc thay vì tin tưởng tuyệt đối 1 nguồn.
-#
-# Thứ tự 15 phần tử trong *_config: [x, y, z, roll, pitch, yaw,
-#                                     vx, vy, vz, vroll, vpitch, vyaw,
-#                                     ax, ay, az]
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
+    sensor_timeout: 0.2
     two_d_mode: true
     publish_tf: true
+    print_diagnostics: true
     publish_acceleration: false
 
     map_frame: map
@@ -26,9 +12,8 @@ ekf_filter_node:
     base_link_frame: base_footprint
     world_frame: odom
 
-    # /wheel/odom: tin vx VÀ vyaw (coi robot bám sát lệnh cmd_vel), không tin
-    # vị trí/hướng tuyệt đối do node nguồn không tự tính - xem wheel_odom_node.py.
-    # Hiện là NGUỒN DUY NHẤT (odom1/imu0 đang tắt, xem comment đầu file).
+    # Nguồn 1: odom từ tích phân /cmd_vel — chỉ tin phần vận tốc (vx, vyaw),
+    # không dùng phần pose vì dead-reckoning trôi theo thời gian.
     odom0: /wheel/odom
     odom0_config: [false, false, false,
                    false, false, false,
@@ -39,64 +24,30 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # --- odom1 (rf2o): TẠM TẮT ĐỂ TEST -- tin HOÀN TOÀN /wheel/odom (odom0),
-    # xem EKF/TF có chạy đúng khi chỉ có 1 nguồn duy nhất không, trước khi đổ
-    # lỗi tiếp cho rf2o. Bỏ comment lại + xoá comment "TẠM TẮT" trên đây khi
-    # muốn dùng lại rf2o để sửa lỗi vị trí/hướng tuyệt đối (odom0 không tự tính
-    # được x,y, chỉ có vx/vyaw suy từ cmd_vel).
-    # odom1: /odom_rf2o
-    # odom1_config: [true,  true,  false,
-    #                false, false, true,
-    #                true,  false, false,
-    #                false, false, true,
-    #                false, false, false]
-    # odom1_differential: false
-    # odom1_relative: false
-    # odom1_queue_size: 10
-    # odom1_pose_rejection_threshold: 0.8
-    # odom1_twist_rejection_threshold: 1.5
+    # Nguồn 2: odom từ rf2o (laser scan matching) — chỉ tin phần pose (x, y, yaw),
+    # vì đây là ước lượng vị trí tuyệt đối trong frame odom, đáng tin hơn vận tốc tức thời.
+    odom1: /odom_rf2o
+    odom1_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_differential: false
+    odom1_relative: false
+    odom1_queue_size: 10
 
-    # --- imu0: TẠM TẮT (xem comment đầu file) -- giữ nguyên cấu hình cũ để dễ
-    # bật lại sau khi rf2o chạy ổn định, chỉ cần bỏ comment + đổi imu0_config
-    # dòng yaw (index 5) thành true nếu muốn fuse lại yaw tuyệt đối từ mag.
-    # imu0: /imu/data
-    # imu0_config: [false, false, false,
-    #               false, false, false,
-    #               false, false, false,
-    #               false, false, true,
-    #               false, false, false]
-    # imu0_differential: false
-    # imu0_relative: false
-    # imu0_queue_size: 10
-    # imu0_remove_gravitational_acceleration: true
-    # imu0_pose_rejection_threshold: 0.8    # ~45 độ
-    # imu0_twist_rejection_threshold: 1.5   # rad/s
-
-    # Loại bỏ phép đo "nhảy" đột ngột: nếu 1 giá trị mới lệch khỏi state đang
-    # dự đoán quá ngưỡng dưới đây thì EKF bỏ qua phép đo đó thay vì cập nhật
-    # theo (chống nhiễu tức thời/rác). Đơn vị: rad (pose), rad/s hoặc m/s (twist).
-    odom0_twist_rejection_threshold: 1.0  # m/s - chủ yếu chặn giá trị rác/hỏng
-
-    # process_noise_covariance: mức "không chắc chắn" nội bộ EKF tự cộng dồn
-    # mỗi giây giữa 2 lần đo (ma trận 15x15, cùng thứ tự state ở trên). Giá
-    # trị càng NHỎ thì EKF càng tin vào mô hình/dự đoán hơn là tin đo đạc mới
-    # -> mượt hơn nhưng phản ứng chậm hơn khi tốc độ đổi thật; càng LỚN thì
-    # bám sát đo đạc hơn nhưng dễ rung theo nhiễu cảm biến. Bắt đầu từ giá trị
-    # mẫu thường dùng của robot_localization, RIÊNG yaw/vyaw (đúng 2 trục đang
-    # bị rung) hạ thấp hơn để ưu tiên mượt - có thể tăng lại nếu thấy phản ứng
-    # xoay bị trễ/ì so với lệnh thật.
-    process_noise_covariance: [0.05, 0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.05, 0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.06, 0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.03, 0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.03, 0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.03,  0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.025, 0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.025, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.04, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.01, 0.0,    0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.01, 0.0,    0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.01, 0.0,    0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.01, 0.0,    0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.01, 0.0,
-                                0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.015]
+    process_noise_covariance: [0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.03, 0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.06, 0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025, 0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.025, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.04, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.01, 0.0,  0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.01, 0.0,  0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.02, 0.0,  0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.01, 0.0,  0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.0,
+                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.015]
