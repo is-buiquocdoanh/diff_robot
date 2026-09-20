@@ -1,5 +1,7 @@
 map_server:
   ros__parameters:
+    # Overridden in launch by the "map" launch configuration or provided default value.
+    # To use in yaml, remove the default "map" value in the tb3_simulation_launch.py file & provide full path to map below.
     yaml_filename: ""
 
 map_saver:
@@ -11,51 +13,48 @@ map_saver:
 
 amcl:
   ros__parameters:
-    # === Motion model: Differential cho robot 2 bánh ===
-    robot_model_type: "nav2_amcl::DifferentialMotionModel"
-    alpha1: 0.02   # noise quay-do-quay (giảm: khi quay, tin odom hơn scan)
+    # === Motion model: OmniMotionModel cho mecanum ===
+    robot_model_type: "nav2_amcl::OmniMotionModel"
+    alpha1: 0.05   # noise quay-do-quay (giảm → tin odom hơn, particles ít spread)
     alpha2: 0.05   # noise quay-do-tiến
-    alpha3: 0.12   # noise tiến-do-tiến (tăng: khi đi thẳng, particle phân tán hơn để scan matching sửa mạnh hơn)
-    alpha4: 0.02   # noise tiến-do-quay (giảm: khi quay, vị trí vẫn bám odom, tránh bị scan kéo lệch)
-    alpha5: 0.05   # không dùng cho differential, giữ mặc định
+    alpha3: 0.05   # noise tiến-do-tiến
+    alpha4: 0.05   # noise tiến-do-quay
+    alpha5: 0.05   # noise tiến-do-đi-ngang (omni strafe)
 
     # === Frame config ===
-    # base_footprint (không phải base_link) -- khớp base_link_frame của EKF
-    # (a3_bringup/config/ekf.yaml) và cây TF thật odom -> base_footprint.
     base_frame_id: "base_footprint"
     global_frame_id: "map"
     odom_frame_id: "odom"
     tf_broadcast: true
     transform_tolerance: 0.5
 
-    # === Laser config — RPLidar A1M8 (xem a3_bringup/launch/lidar.launch.py) ===
-    # /scan đã được lidar_filter.yaml lọc bỏ tia < 0.25m trước khi tới đây.
+    # === Laser config — RPLIDAR A1M8 ===
     scan_topic: /scan
     laser_model_type: "likelihood_field"
-    laser_min_range: 0.15      # A1M8 min range
-    laser_max_range: 12.0      # A1M8 max range ~12m
+    laser_min_range: 0.12       # TG30 min range
+    laser_max_range: 12.0      # TG30 max ~30m, giữ margin
     laser_likelihood_max_dist: 2.0
-    max_beams: 200             # tăng: dùng nhiều tia → hội tụ nhanh hơn
-    sigma_hit: 0.1             # siết chặt: yêu cầu match sát
+    max_beams: 240             # nhiều tia hơn → measurement update mạnh hơn → hội tụ nhanh
+    sigma_hit: 0.15            # siết lại → particles hội tụ chặt hơn về vị trí đúng
 
-    # === Beam skip ===
+    # === Beam skip — lọc tia bị chặn bởi vật động ===
     do_beamskip: true
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
 
     # === Particle filter ===
-    min_particles: 1500        # tăng: luôn đủ hạt để hội tụ chính xác
-    max_particles: 5000        # tăng: phủ rộng, PC không lo CPU
-    pf_err: 0.02               # siết: yêu cầu chính xác hơn
+    min_particles: 1500        # tăng: luôn đủ hạt để không bị hội tụ sai khi lắc
+    max_particles: 5000        # tăng: phủ rộng hơn khi robot di chuyển nhanh
+    pf_err: 0.02               # giảm: yêu cầu particle filter chính xác hơn
     pf_z: 0.99
-    resample_interval: 2       # giữ đa dạng hạt, tránh depletion khi lắc
-    recovery_alpha_fast: 0.05  # giảm: ít inject hạt random khi lắc
+    resample_interval: 2       # resample mỗi 2 update thay vì 1 → tránh mất đa dạng hạt khi lắc
+    recovery_alpha_fast: 0.05  # giảm: ít inject hạt ngẫu nhiên → tránh nhiễu khi lắc nhanh
     recovery_alpha_slow: 0.001
 
     # === Update triggers ===
-    update_min_a: 0.03         # update khi quay ~1.7° → phản ứng nhanh
-    update_min_d: 0.05         # update khi đi 5cm → bám sát chuyển động
+    update_min_a: 0.01         # update khi quay ~3° (mecanum quay nhiều)
+    update_min_d: 0.03         # update khi đi 8cm (mecanum di chuyển tinh chỉnh)
 
     # === Sensor weights ===
     z_hit: 0.7
