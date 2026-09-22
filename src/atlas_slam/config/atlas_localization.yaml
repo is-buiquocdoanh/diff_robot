@@ -1,7 +1,7 @@
 map_server:
   ros__parameters:
-    # Overridden in launch by the "map" launch configuration or provided default value.
-    # To use in yaml, remove the default "map" value in the tb3_simulation_launch.py file & provide full path to map below.
+    # yaml_filename được RewrittenYaml tiêm vào lúc launch từ arg "map" (xem
+    # localization.launch.py), không cần điền tay ở đây.
     yaml_filename: ""
 
 map_saver:
@@ -13,13 +13,13 @@ map_saver:
 
 amcl:
   ros__parameters:
-    # === Motion model: OmniMotionModel cho mecanum ===
-    robot_model_type: "nav2_amcl::OmniMotionModel"
+    # === Motion model: Differential cho robot 2 bánh (A3, không phải mecanum) ===
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
     alpha1: 0.05   # noise quay-do-quay (giảm → tin odom hơn, particles ít spread)
     alpha2: 0.05   # noise quay-do-tiến
     alpha3: 0.05   # noise tiến-do-tiến
     alpha4: 0.05   # noise tiến-do-quay
-    alpha5: 0.05   # noise tiến-do-đi-ngang (omni strafe)
+    alpha5: 0.05   # không dùng cho differential, giữ mặc định
 
     # === Frame config ===
     base_frame_id: "base_footprint"
@@ -31,8 +31,8 @@ amcl:
     # === Laser config — RPLIDAR A1M8 ===
     scan_topic: /scan
     laser_model_type: "likelihood_field"
-    laser_min_range: 0.12       # TG30 min range
-    laser_max_range: 12.0      # TG30 max ~30m, giữ margin
+    laser_min_range: 0.12       # A1M8 min range
+    laser_max_range: 12.0      # A1M8 max ~12m
     laser_likelihood_max_dist: 2.0
     max_beams: 240             # nhiều tia hơn → measurement update mạnh hơn → hội tụ nhanh
     sigma_hit: 0.15            # siết lại → particles hội tụ chặt hơn về vị trí đúng
@@ -53,8 +53,8 @@ amcl:
     recovery_alpha_slow: 0.001
 
     # === Update triggers ===
-    update_min_a: 0.01         # update khi quay ~3° (mecanum quay nhiều)
-    update_min_d: 0.03         # update khi đi 8cm (mecanum di chuyển tinh chỉnh)
+    update_min_a: 0.01         # update khi quay ~3°
+    update_min_d: 0.03         # update khi đi 3cm
 
     # === Sensor weights ===
     z_hit: 0.7

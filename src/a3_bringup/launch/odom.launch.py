@@ -1,6 +1,6 @@
 """Tạo /odom + TF odom -> base_footprint bằng EKF (robot_localization), fusion
-/wheel/odom (vx suy từ /cmd_vel) với /odom_rf2o (x,y,yaw + vx,vyaw, đo bằng so
-khớp scan liên tiếp -- xem package rf2o_laser_odometry).
+/wheel/odom (vx,vyaw suy từ /cmd_vel) với /odom_rf2o (x,y,yaw, đo bằng so khớp
+scan liên tiếp -- xem package rf2o_laser_odometry).
 
 TẠM THỜI không dùng /imu/data (BNO055) -- xem comment đầu config/ekf.yaml.
 
@@ -14,12 +14,18 @@ thô từ IMU mỗi tick, gây rung/giật khi IMU nhiễu. Nay tách làm 3:
     rồi mới ra /odom + TF, publish thẳng trong file này (không qua launch
     riêng -- ekf_node chỉ dùng đúng ở đây, tách file khác chỉ thêm 1 lớp
     include không cần thiết).
+
+Arg "source" để cô lập test từng nguồn mà KHÔNG cần sửa tay config/ekf.yaml:
+
+    ros2 launch a3_bringup odom.launch.py source:=wheel_only
+    ros2 launch a3_bringup odom.launch.py source:=rf2o_only
+    ros2 launch a3_bringup odom.launch.py source:=both   # mặc định, dùng thật
 """
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -40,6 +46,14 @@ def generate_launch_description():
     cmd_vel_timeout_arg = DeclareLaunchArgument(
         'cmd_vel_timeout', default_value='0.5',
         description='Sau bao nhiêu giây không nhận /cmd_vel thì coi robot đã dừng (giây)')
+    source_arg = DeclareLaunchArgument(
+        'source', default_value='both',
+        choices=['wheel_only', 'rf2o_only', 'both'],
+        description=(
+            'Nguồn odometry cho EKF, để cô lập test drift từng nguồn: '
+            'wheel_only (chỉ /wheel/odom) | rf2o_only (chỉ /odom_rf2o) | '
+            'both (mặc định, dùng thật)'
+        ))
 
     # /cmd_vel -> /wheel/odom (chỉ vx, xem a3_driver/scripts/wheel_odom_node.py)
     wheel_odom_node = Node(
@@ -79,22 +93,48 @@ def generate_launch_description():
     # định publish odometry đã lọc ra topic `odometry/filtered` -- remap về
     # /odom cho khớp với những gì slam_toolbox/nav2 mong đợi, đồng thời tự
     # broadcast TF odom -> base_footprint (publish_tf: true trong ekf.yaml).
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config],
-        remappings=[('odometry/filtered', 'odom')],
-    )
+    #
+    # OpaqueFunction để .perform(context) arg "source" ngay lúc launch, tính ra
+    # đúng bộ odom0_config/odom1_config rồi đè lên giá trị trong ekf.yaml --
+    # Node(parameters=[file, {...}]) merge nhiều nguồn, phần tử SAU ghi đè phần
+    # tử TRƯỚC cùng key, nên không cần sửa tay file yaml mỗi lần đổi source.
+    _FULL_WHEEL_CONFIG = [False, False, False,
+                           False, False, False,
+                           True,  False, False,
+                           False, False, True,
+                           False, False, False]
+    _FULL_RF2O_CONFIG = [True,  True,  False,
+                          False, False, True,
+                          False, False, False,
+                          False, False, False,
+                          False, False, False]
+    _OFF_CONFIG = [False] * 15
+
+    def _make_ekf_node(context, *args, **kwargs):
+        source = LaunchConfiguration('source').perform(context)
+        odom0_config = _FULL_WHEEL_CONFIG if source in ('wheel_only', 'both') else _OFF_CONFIG
+        odom1_config = _FULL_RF2O_CONFIG if source in ('rf2o_only', 'both') else _OFF_CONFIG
+        node = Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=[ekf_config, {
+                'odom0_config': odom0_config,
+                'odom1_config': odom1_config,
+            }],
+            remappings=[('odometry/filtered', 'odom')],
+        )
+        return [node]
 
     return LaunchDescription([
         rate_arg,
         odom_frame_arg,
         base_frame_arg,
         cmd_vel_timeout_arg,
+        source_arg,
 
         wheel_odom_node,
         rf2o_node,
-        ekf_node,
+        OpaqueFunction(function=_make_ekf_node),
     ])
