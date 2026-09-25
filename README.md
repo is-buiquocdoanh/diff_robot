@@ -3,6 +3,16 @@
 Xây dựng lại bộ điều khiển robot 2 bánh vi sai (differential drive) từ đầu, dựa trên
 kiến trúc driver của dự án mecanum trước đó.
 
+## Cài đặt
+
+```bash
+./setup/install_dependencies.sh                      # ROS 2 Humble + toàn bộ gói ROS/Python của dự án + quyền dialout
+./setup/install_dependencies.sh --with-platformio   # (tuỳ chọn) thêm PlatformIO để nạp firmware ESP32
+./setup/install_dependencies.sh --dry-run            # chỉ in các lệnh sẽ chạy
+
+colcon build --symlink-install && source install/setup.bash
+```
+
 ## Cấu trúc
 
 - `src/diff_drive_ros` — firmware ESP32 (PlatformIO): đọc frame lệnh từ ROS qua Serial/UART2,
