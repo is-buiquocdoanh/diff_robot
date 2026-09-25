@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A3 Robot - Điều khiển bằng web</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Crect x='8' y='11' width='16' height='12' rx='3' fill='white'/%3E%3Ccircle cx='13' cy='17' r='1.8' fill='%232563eb'/%3E%3Ccircle cx='19' cy='17' r='1.8' fill='%232563eb'/%3E%3Crect x='15' y='6' width='2' height='5' fill='white'/%3E%3C/svg%3E">
+    <script src="/static/vendor/tailwind.js"></script>
+    <script src="/static/vendor/lucide.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; overflow-x: hidden; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        #mapCanvas { touch-action: none; }
+        .teleop-btn { touch-action: none; user-select: none; -webkit-user-select: none; }
+        .tab-content { display: none; }
+        .tab-content.active { display: flex; }
+        .chip { display: inline-flex; align-items: center; gap: .35rem; padding: .125rem .6rem; border-radius: 9999px; font-size: 11px; font-weight: 700; border-width: 1px; }
+        .chip-green { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+        .chip-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+        .chip-amber { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+        .chip-red { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+        .chip-gray { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: .45rem .9rem; border-radius: .5rem; font-size: 12px; font-weight: 700; transition: all .15s; border: 1px solid transparent; }
+        .btn:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-primary { background: #2563eb; color: #fff; } .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+        .btn-soft { background: #f1f5f9; color: #334155; border-color: #e2e8f0; } .btn-soft:hover:not(:disabled) { background: #e2e8f0; }
+        .btn-danger { background: #fef2f2; color: #dc2626; border-color: #fecaca; } .btn-danger:hover:not(:disabled) { background: #dc2626; color: #fff; }
+        .btn-amber { background: #fffbeb; color: #b45309; border-color: #fde68a; } .btn-amber:hover:not(:disabled) { background: #f59e0b; color: #fff; }
+        .field { width: 100%; padding: .45rem .65rem; border: 1px solid #cbd5e1; border-radius: .5rem; font-size: 13px; background: #fff; color: #0f172a; user-select: text; }
+        .field:focus { outline: 2px solid #93c5fd; border-color: #3b82f6; }
+        .tool-on { background: #2563eb !important; color: #fff !important; border-color: #2563eb !important; }
+        .toggle-on { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+        input, textarea, pre { user-select: text; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row overflow-hidden bg-slate-50 text-slate-900 select-none">
+
+    <!-- ============ Sidebar (desktop) ============ -->
+    <aside class="hidden md:flex w-64 bg-white border-r border-slate-200 flex-col justify-between z-20 shrink-0 shadow-sm">
+        <div>
+            <div class="p-4 border-b border-slate-200 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center shadow-md shadow-blue-500/20 text-white">
+                        <i data-lucide="bot" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base tracking-wide text-slate-900">A3 ROBOT</h1>
+                        <span class="text-xs text-slate-500 font-mono whitespace-nowrap">Web control</span>
+                    </div>
+                </div>
+                <div id="conn-badge" class="chip chip-red"><span class="w-2 h-2 rounded-full bg-red-500"></span><span>Offline</span></div>
+            </div>
+            <nav class="p-3 space-y-1" id="side-nav">
+                <button data-tab="dashboard" onclick="switchTab('dashboard')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="layout-dashboard" class="w-4 h-4"></i><span>Điều khiển</span></button>
+                <button data-tab="maps" onclick="switchTab('maps')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="map" class="w-4 h-4"></i><span>Bản đồ (SLAM)</span></button>
+                <button data-tab="waypoints" onclick="switchTab('waypoints')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="map-pin" class="w-4 h-4"></i><span>Điểm đến (Waypoints)</span></button>
+                <button data-tab="tasks" onclick="switchTab('tasks')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="list-todo" class="w-4 h-4"></i><span>Nhiệm vụ</span><span id="task-count-badge" class="ml-auto bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">0</span></button>
+                <button data-tab="system" onclick="switchTab('system')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="settings" class="w-4 h-4"></i><span>Hệ thống</span></button>
+            </nav>
+        </div>
+        <div class="p-3 m-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-2">
+            <div class="flex justify-between items-center"><span>Chế độ:</span><span id="ft-mode" class="font-mono font-semibold text-slate-800">-</span></div>
+            <div class="flex justify-between items-center"><span>Khung toạ độ:</span><span id="ft-frame" class="font-mono font-semibold text-slate-800">-</span></div>
+            <div class="flex justify-between items-center"><span>Tần số LiDAR:</span><span id="ft-lidar" class="font-mono font-semibold text-slate-800">-</span></div>
+            <div class="flex justify-between items-center"><span>Nav2:</span><span id="ft-nav" class="font-mono font-semibold text-slate-800">-</span></div>
+        </div>
+    </aside>
+
+    <!-- ============ Main ============ -->
+    <main class="flex-1 flex flex-col h-full overflow-hidden relative min-h-0">
+
+        <header class="min-h-16 border-b border-slate-200 bg-white/80 backdrop-blur px-3 md:px-6 py-2 flex flex-wrap items-center justify-between gap-2 z-10 shrink-0 shadow-sm">
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                    <i data-lucide="layers" class="w-4 h-4 text-blue-600"></i>
+                    <span class="text-xs text-slate-500 font-medium hidden sm:inline">Bản đồ:</span>
+                    <select id="map-select" onchange="selectMap(this.value)" class="bg-transparent text-sm font-semibold text-slate-800 focus:outline-none cursor-pointer max-w-[160px]"></select>
+                </div>
+                <div id="mode-chip" class="chip chip-gray">IDLE</div>
+                <div id="op-indicator" class="hidden chip chip-amber"><i data-lucide="loader" class="w-3.5 h-3.5 spin"></i><span id="op-text">Đang chuyển chế độ...</span></div>
+            </div>
+            <div class="flex items-center space-x-2 md:space-x-4">
+                <div id="battery-box" class="hidden items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                    <i data-lucide="battery-charging" class="w-4 h-4 text-emerald-600"></i>
+                    <span id="header-battery" class="text-xs font-mono font-bold text-slate-800">-</span>
+                </div>
+                <div id="status-badge" class="chip chip-gray text-xs px-3 py-1.5"><i data-lucide="circle-check" class="w-4 h-4"></i><span id="robot-status-text">Đang kết nối...</span></div>
+                <button id="btn-estop" onclick="toggleEstop()" class="px-3 md:px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-md shadow-red-500/20 border border-red-500/30 flex items-center space-x-2 transition-all active:scale-95">
+                    <i data-lucide="octagon-alert" class="w-4 h-4"></i><span id="estop-label">E-STOP</span>
+                </button>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-hidden relative flex min-h-0 pb-14 md:pb-0">
+
+            <!-- ======== TAB: Điều khiển ======== -->
+            <div id="tab-dashboard" class="tab-content flex-1 flex-col lg:flex-row h-full w-full overflow-y-auto lg:overflow-hidden">
+                <div class="flex-1 flex flex-col relative bg-slate-100 overflow-hidden min-h-[55vh] lg:min-h-0">
+                    <!-- góc trái-trên: toolbar + HUD + thao tác quét (xếp dọc, không đè nhau) -->
+                    <div class="absolute top-3 left-3 z-10 flex flex-col gap-2 items-start max-w-[calc(100%-1.5rem)]">
+                        <div class="flex flex-wrap gap-1.5 bg-white/90 backdrop-blur p-1.5 rounded-xl border border-slate-200 shadow-lg">
+                        <button onclick="zoomBy(1.25)" title="Phóng to" class="p-2 hover:bg-slate-100 text-slate-700 rounded-lg"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
+                        <button onclick="zoomBy(0.8)" title="Thu nhỏ" class="p-2 hover:bg-slate-100 text-slate-700 rounded-lg"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
+                        <button onclick="fitView()" title="Vừa khung" class="p-2 hover:bg-slate-100 text-slate-700 rounded-lg"><i data-lucide="maximize" class="w-4 h-4"></i></button>
+                        <div class="w-px h-6 bg-slate-200 my-auto"></div>
+                        <button id="btn-grid" onclick="toggleLayer('grid')" title="Lưới" class="p-2 rounded-lg border border-transparent toggle-on"><i data-lucide="grid-3x3" class="w-4 h-4"></i></button>
+                        <button id="btn-scan" onclick="toggleLayer('scan')" title="Tia LiDAR" class="p-2 rounded-lg border border-transparent toggle-on"><i data-lucide="radar" class="w-4 h-4"></i></button>
+                        <div class="w-px h-6 bg-slate-200 my-auto"></div>
+                        <button id="tool-pan" onclick="setTool('pan')" title="Kéo bản đồ" class="px-2.5 py-1.5 font-bold text-xs rounded-lg flex items-center gap-1.5 transition text-slate-700 hover:bg-slate-100"><i data-lucide="hand" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Kéo</span></button>
+                        <button id="tool-goal" onclick="setTool('goal')" title="Chọn điểm đến (nhấn giữ & kéo để chỉnh hướng)" class="px-2.5 py-1.5 font-bold text-xs rounded-lg flex items-center gap-1.5 transition text-slate-700 hover:bg-slate-100"><i data-lucide="navigation" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Đi tới</span></button>
+                        <button id="tool-init" onclick="setTool('init')" title="Đặt vị trí ban đầu cho AMCL" class="px-2.5 py-1.5 font-bold text-xs rounded-lg flex items-center gap-1.5 transition text-slate-700 hover:bg-slate-100"><i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Vị trí ban đầu</span></button>
+                        <button id="tool-add" onclick="setTool('add')" title="Thêm waypoint" class="px-2.5 py-1.5 font-bold text-xs rounded-lg flex items-center gap-1.5 transition text-slate-700 hover:bg-slate-100"><i data-lucide="map-pin" class="w-3.5 h-3.5"></i><span class="hidden sm:inline">Thêm điểm</span></button>
+                    </div>
+                        <div class="bg-white/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-mono flex flex-wrap gap-x-4 gap-y-1 shadow-lg">
+                        <div>X: <span id="hud-x" class="text-blue-600 font-bold">-</span>m</div>
+                        <div>Y: <span id="hud-y" class="text-blue-600 font-bold">-</span>m</div>
+                        <div>θ: <span id="hud-theta" class="text-amber-600 font-bold">-</span>°</div>
+                        <div>v: <span id="hud-speed" class="text-emerald-600 font-bold">-</span>m/s</div>
+                    </div>
+                        <div id="mapping-actions" class="hidden flex-wrap gap-2 bg-amber-50/95 backdrop-blur p-2 rounded-xl border border-amber-300 shadow-lg">
+                        <div class="chip chip-amber animate-pulse self-center"><i data-lucide="radar" class="w-3.5 h-3.5 spin"></i><span>ĐANG QUÉT SLAM</span></div>
+                        <button onclick="saveMapDialog()" class="btn btn-primary"><i data-lucide="save" class="w-4 h-4"></i>Lưu bản đồ</button>
+                        <button onclick="endScan()" class="btn btn-soft"><i data-lucide="square" class="w-4 h-4"></i>Kết thúc quét</button>
+                    </div>
+                    </div>
+
+                    <!-- tool hint -->
+                    <div id="tool-hint" class="hidden absolute top-3 right-3 z-10 bg-slate-900/85 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none max-w-[45%]"></div>
+
+                    <!-- waypoint card -->
+                    <div id="wp-card" class="hidden absolute bottom-3 right-3 z-10 bg-white/95 backdrop-blur p-3 rounded-xl border border-slate-200 shadow-lg text-xs space-y-2 w-60"></div>
+
+                    <!-- legend -->
+                    <div class="absolute bottom-3 left-3 z-10 bg-white/90 backdrop-blur p-3 rounded-xl border border-slate-200 text-xs space-y-1.5 shadow-lg hidden xl:block">
+                        <div class="font-bold text-slate-500 mb-1">CHÚ GIẢI</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-blue-600 inline-block"></span><span class="text-slate-700">Robot (đúng kích thước)</span></div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-cyan-500 inline-block"></span><span class="text-slate-700">Bàn ăn</span></div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span><span class="text-slate-700">Nhà bếp</span></div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-purple-500 inline-block"></span><span class="text-slate-700">Trạm sạc</span></div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-0.5 border-t-2 border-dashed border-blue-500 inline-block"></span><span class="text-slate-700">Đường đi kế hoạch</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span><span class="text-slate-700">Điểm quét LiDAR</span></div>
+                    </div>
+
+                    <div class="w-full h-full cursor-grab" id="canvas-container">
+                        <canvas id="mapCanvas" class="w-full h-full block"></canvas>
+                    </div>
+                </div>
+
+                <!-- right panel -->
+                <div class="w-full lg:w-96 bg-white border-t lg:border-t-0 lg:border-l border-slate-200 flex flex-col shrink-0 lg:h-full lg:overflow-y-auto shadow-sm">
+                    <div class="p-4 border-b border-slate-200 space-y-2">
+                        <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2"><i data-lucide="route" class="w-4 h-4 text-blue-600"></i>ĐIỀU HƯỚNG</h2>
+                        <div id="nav-line" class="text-xs text-slate-600">Chưa có mục tiêu</div>
+                        <div class="w-full bg-slate-200 rounded-full h-1.5"><div id="nav-progress" class="bg-blue-600 h-1.5 rounded-full transition-all" style="width:0%"></div></div>
+                        <div id="nav-extra" class="text-[11px] text-slate-500 font-mono"></div>
+                        <button id="btn-cancel-nav" onclick="cancelNav()" class="btn btn-danger w-full hidden"><i data-lucide="x" class="w-4 h-4"></i>Hủy mục tiêu</button>
+                    </div>
+
+                    <div class="p-4 border-b border-slate-200">
+                        <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2 mb-3"><i data-lucide="send" class="w-4 h-4 text-blue-600"></i>ĐI NHANH TỚI ĐIỂM</h2>
+                        <div id="quick-list" class="grid grid-cols-3 gap-2"></div>
+                    </div>
+
+                    <div class="p-4 border-b border-slate-200 flex flex-col items-center">
+                        <div class="w-full flex justify-between items-center mb-3">
+                            <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2"><i data-lucide="gamepad-2" class="w-4 h-4 text-blue-600"></i>ĐIỀU KHIỂN TAY</h2>
+                            <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono border border-slate-200">W A S D / mũi tên</span>
+                        </div>
+                        <div class="relative w-44 h-44 bg-slate-50 rounded-full border border-slate-200 flex items-center justify-center p-3 my-2 shadow-inner">
+                            <button data-dir="up" class="teleop-btn absolute top-2 w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 flex items-center justify-center text-slate-700 transition shadow-sm active:scale-90"><i data-lucide="chevron-up" class="w-5 h-5"></i></button>
+                            <button data-dir="down" class="teleop-btn absolute bottom-2 w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 flex items-center justify-center text-slate-700 transition shadow-sm active:scale-90"><i data-lucide="chevron-down" class="w-5 h-5"></i></button>
+                            <button data-dir="left" class="teleop-btn absolute left-2 w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 flex items-center justify-center text-slate-700 transition shadow-sm active:scale-90"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+                            <button data-dir="right" class="teleop-btn absolute right-2 w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-blue-600 hover:text-white hover:border-blue-600 flex items-center justify-center text-slate-700 transition shadow-sm active:scale-90"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+                            <button onclick="stopTeleop()" class="w-12 h-12 rounded-full bg-rose-50 border border-rose-300 text-rose-600 hover:bg-rose-600 hover:text-white font-bold text-xs flex items-center justify-center transition active:scale-90 shadow-md">STOP</button>
+                        </div>
+                        <div class="w-full space-y-2 mt-2 text-xs text-slate-600">
+                            <label class="flex justify-between"><span>Tốc độ tiến/lùi</span><span id="lbl-lin" class="font-mono font-bold text-blue-600">0.30 m/s</span></label>
+                            <input id="rng-lin" type="range" min="0.05" max="0.5" step="0.05" value="0.3" class="w-full accent-blue-600">
+                            <label class="flex justify-between"><span>Tốc độ xoay</span><span id="lbl-ang" class="font-mono font-bold text-blue-600">0.80 rad/s</span></label>
+                            <input id="rng-ang" type="range" min="0.2" max="1.5" step="0.1" value="0.8" class="w-full accent-blue-600">
+                        </div>
+                    </div>
+
+                    <div class="p-4 space-y-3">
+                        <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2"><i data-lucide="cpu" class="w-4 h-4 text-purple-600"></i>CẢM BIẾN</h2>
+                        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                            <div class="flex justify-between items-center text-xs"><span class="text-slate-600">Vật cản gần nhất (LiDAR):</span><span id="s-obstacle" class="font-mono font-bold text-slate-800">-</span></div>
+                            <div class="w-full bg-slate-200 rounded-full h-1.5"><div id="s-obstacle-bar" class="bg-emerald-500 h-1.5 rounded-full transition-all" style="width:0%"></div></div>
+                        </div>
+                        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs">
+                            <div class="flex justify-between"><span class="text-slate-600">Vận tốc thẳng / góc (odom):</span><span id="s-speed" class="font-mono font-bold text-slate-800">-</span></div>
+                            <div class="flex justify-between"><span class="text-slate-600">LiDAR:</span><span id="s-lidar" class="font-mono font-bold text-slate-800">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ======== TAB: Bản đồ ======== -->
+            <div id="tab-maps" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
+                <div class="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900">Bản đồ</h2>
+                        <p class="text-sm text-slate-500">Quét bản đồ mới bằng SLAM, chọn bản đồ để điều hướng. Thư mục: <span id="maps-dir" class="font-mono text-xs"></span></p>
+                    </div>
+                    <button onclick="startScan()" class="btn btn-primary"><i data-lucide="radar" class="w-4 h-4"></i>Quét bản đồ mới (SLAM)</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="maps-grid"></div>
+            </div>
+
+            <!-- ======== TAB: Waypoints ======== -->
+            <div id="tab-waypoints" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
+                <div class="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900">Điểm đến & bàn ăn</h2>
+                        <p class="text-sm text-slate-500">Bản đồ: <span id="wp-map-name" class="font-semibold text-slate-800">-</span>. Thêm điểm bằng công cụ "Thêm điểm" trên bản đồ, hoặc lưu đúng vị trí robot đang đứng.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-wp-here" onclick="addWaypointHere()" class="btn btn-soft"><i data-lucide="crosshair" class="w-4 h-4"></i>Lưu vị trí robot hiện tại</button>
+                        <button onclick="switchTab('dashboard'); setTool('add')" class="btn btn-primary"><i data-lucide="plus" class="w-4 h-4"></i>Thêm trên bản đồ</button>
+                    </div>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+                    <table class="w-full text-left text-sm text-slate-700">
+                        <thead class="bg-slate-50 text-xs uppercase text-slate-500 border-b border-slate-200 font-mono">
+                            <tr><th class="p-3">Tên điểm</th><th class="p-3">Loại</th><th class="p-3">Toạ độ (X, Y)</th><th class="p-3">Hướng</th><th class="p-3 text-right">Thao tác</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200" id="wp-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ======== TAB: Nhiệm vụ ======== -->
+            <div id="tab-tasks" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
+                <div class="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900">Hàng đợi nhiệm vụ giao đồ</h2>
+                        <p class="text-sm text-slate-500">Robot chạy lần lượt từng điểm; tới nơi thì chờ bạn xác nhận đã giao rồi mới đi tiếp.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-pause" onclick="togglePause()" class="btn btn-soft"><i data-lucide="pause" class="w-4 h-4"></i><span>Tạm dừng hàng đợi</span></button>
+                        <button onclick="clearTasks(true)" class="btn btn-soft">Xóa việc đã xong</button>
+                        <button onclick="clearTasks(false)" class="btn btn-danger">Hủy toàn bộ</button>
+                    </div>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
+                    <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                        <div><label class="text-xs text-slate-600 font-medium">Giao tới</label><select id="task-wp" class="field"></select></div>
+                        <div><label class="text-xs text-slate-600 font-medium">Ghi chú (vd: món ăn)</label><input id="task-note" class="field" maxlength="80" placeholder="Phở bò đặc biệt"></div>
+                        <button onclick="addTask()" class="btn btn-primary"><i data-lucide="plus" class="w-4 h-4"></i>Thêm nhiệm vụ</button>
+                    </div>
+                    <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-700">
+                        <label class="flex items-center gap-2"><input id="chk-confirm" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Chờ xác nhận đã giao mới đi tiếp</label>
+                        <label class="flex items-center gap-2"><input id="chk-home" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Tự về Bếp/Trạm sạc khi hết việc</label>
+                    </div>
+                </div>
+                <div class="space-y-3" id="tasks-list"></div>
+            </div>
+
+            <!-- ======== TAB: Hệ thống ======== -->
+            <div id="tab-system" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-900">Hệ thống</h2>
+                    <p class="text-sm text-slate-500">Bật/tắt các thành phần ROS2. Bình thường bạn không cần vào đây: chọn "Quét bản đồ" hoặc "Kích hoạt" bản đồ là web tự bật đúng stack.</p>
+                </div>
+                <div class="grid grid-cols-1 xl:grid-cols-3 gap-4" id="stacks-grid"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
+                        <h3 class="font-bold text-base text-blue-600 flex items-center gap-2"><i data-lucide="navigation" class="w-5 h-5"></i>Điều hướng (Nav2)</h3>
+                        <div>
+                            <label class="text-xs text-slate-700 font-medium">Bộ điều khiển quỹ đạo (controller)</label>
+                            <select id="sel-controller" class="field mt-1" onchange="setController(this.value)">
+                                <option value="dwb">dwb</option><option value="rpp">rpp</option><option value="mppi">mppi</option>
+                            </select>
+                            <p class="text-xs text-slate-500 mt-1">Áp dụng ở lần khởi động Nav2 kế tiếp (vào lại chế độ Điều hướng để đổi).</p>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-sm">
+                        <h3 class="font-bold text-base text-emerald-600 flex items-center gap-2"><i data-lucide="info" class="w-5 h-5"></i>Thông tin</h3>
+                        <div class="text-xs text-slate-600 space-y-1 font-mono">
+                            <div>Thư mục bản đồ: <span id="sys-maps-dir" class="text-slate-900"></span></div>
+                            <div>Giới hạn teleop: <span id="sys-limits" class="text-slate-900"></span></div>
+                            <div>Kích thước robot: <span id="sys-robot" class="text-slate-900"></span></div>
+                        </div>
+                        <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Web không có đăng nhập: ai trong cùng mạng đều điều khiển được robot. E-STOP trên web chỉ là dừng bằng phần mềm — vẫn cần nút dừng khẩn cấp phần cứng.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- mobile bottom nav -->
+        <nav class="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex justify-around py-1.5">
+            <button data-tab="dashboard" onclick="switchTab('dashboard')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="layout-dashboard" class="w-5 h-5"></i>Điều khiển</button>
+            <button data-tab="maps" onclick="switchTab('maps')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="map" class="w-5 h-5"></i>Bản đồ</button>
+            <button data-tab="waypoints" onclick="switchTab('waypoints')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="map-pin" class="w-5 h-5"></i>Điểm</button>
+            <button data-tab="tasks" onclick="switchTab('tasks')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="list-todo" class="w-5 h-5"></i>Nhiệm vụ</button>
+            <button data-tab="system" onclick="switchTab('system')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="settings" class="w-5 h-5"></i>Hệ thống</button>
+        </nav>
+    </main>
+
+    <div id="modal-root"></div>
+    <div id="toast" class="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 bg-white border border-slate-200 text-slate-900 px-4 py-3 rounded-xl shadow-xl flex items-center space-x-3 transition-all duration-300 opacity-0 translate-y-5 pointer-events-none max-w-sm">
+        <i data-lucide="info" class="w-5 h-5 text-blue-600 shrink-0" id="toast-icon"></i>
+        <span id="toast-message" class="text-xs font-semibold"></span>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

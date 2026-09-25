@@ -1,0 +1,42 @@
+# Tham số node web_server (a3_web). Mọi giá trị đều có mặc định trong code; file này để
+# bạn chỉnh mà không phải sửa code. Ghi đè nhanh qua launch: ros2 launch a3_web web.launch.py port:=9000
+a3_web_server:
+  ros__parameters:
+    # ---- máy chủ web
+    host: "0.0.0.0"          # 0.0.0.0 = truy cập được từ máy khác trong mạng LAN (KHÔNG có đăng nhập!)
+    port: 8080
+    maps_dir: ""             # rỗng = tự tìm src/a3_maps rồi ~/a3_maps. Layout: <maps_dir>/<tên>/<tên>.yaml
+    config_dir: "~/.a3_web"  # settings.json + log các stack
+    autostart_bringup: true  # tự chạy bringup khi web khởi động (bỏ qua nếu thấy bringup đã chạy ngoài)
+
+    # ---- lệnh bật các stack. Placeholder: {map_yaml} {controller}
+    cmd_bringup: "ros2 launch a3_bringup bringup.launch.py"
+    cmd_slam: "ros2 launch atlas_slam slam.launch.py rviz:=false"
+    cmd_nav: "ros2 launch atlas_slam navigation.launch.py map:={map_yaml} controller:={controller} rviz:=false"
+    controller: "dwb"        # dwb | rpp | mppi (đổi được trên web, mục Hệ thống)
+
+    # ---- node đặc trưng để web biết stack đã sẵn sàng / đang chạy ngoài web
+    ready_nodes_bringup: ["serial_bridge_node"]
+    ready_nodes_slam: ["slam_toolbox"]
+    ready_nodes_nav: ["bt_navigator", "amcl"]
+
+    # ---- frame + topic (khớp a3_bringup / atlas_slam)
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    scan_topic: "/scan"
+    odom_topic: "/odom"
+    map_topic: "/map"
+    plan_topic: "/plan"
+    cmd_vel_topic: "/cmd_vel"
+    initialpose_topic: "/initialpose"
+    battery_topic: "/battery_state"   # tuỳ chọn: không có topic này thì web ẩn ô pin
+    nav_action: "navigate_to_pose"
+
+    # ---- giới hạn an toàn cho teleop bấm từ web (m/s, rad/s)
+    max_linear: 0.5
+    max_angular: 1.5
+
+    # ---- kích thước thân robot (m) để vẽ đúng tỉ lệ; khớp footprint 0.5 x 0.44 trong nav2 params
+    robot_length: 0.50
+    robot_width: 0.44

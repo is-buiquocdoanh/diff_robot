@@ -32,3 +32,9 @@ kiến trúc driver của dự án mecanum trước đó.
     `joint_state_publisher` (URDF `a3_description`), `kinematic.py` +
     `serial_bridge_node.py`, `odom.launch.py`, `lidar.launch.py`. Dùng
     `ros2 launch a3_bringup bringup.launch.py` là đủ khởi động cả robot.
+- `src/a3_web` — web local điều khiển robot bằng trình duyệt (không cần gõ tay các launch SLAM/Nav2):
+  quét & lưu bản đồ (`slam_toolbox`), chọn/hiển thị waypoint, bấm để robot tự đi (Nav2), lái tay
+  (W A S D), hàng đợi giao đồ, E-STOP phần mềm. Web tự bật/tắt `a3_bringup` + `atlas_slam` (SLAM / Nav2)
+  theo chế độ. Chạy: `ros2 launch a3_web web.launch.py` rồi mở `http://<ip-robot>:8080`
+  (thử không cần robot: `ros2 launch a3_web demo.launch.py`). Cần `python3-aiohttp`
+  (`rosdep install --from-paths src --ignore-src -r -y`). Xem `src/a3_web/README.md`.

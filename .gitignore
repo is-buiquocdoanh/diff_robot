@@ -11,3 +11,6 @@ __pycache__/
 .vscode/
 *.swp
 .DS_Store
+
+# pytest
+.pytest_cache/
