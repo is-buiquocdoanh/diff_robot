@@ -138,6 +138,32 @@ def clean_waypoint(data, base=None):
     return wp
 
 
+MAX_ROUTE_STEPS = 50
+
+
+def clean_route(data, valid_ids, base=None):
+    """Kiểm tra + chuẩn hóa lộ trình: tên, danh sách id waypoint theo thứ tự (được lặp lại), loop."""
+    rt = dict(base or {})
+    if 'name' in data or not base:
+        name = str(data.get('name', '')).strip()
+        if not (1 <= len(name) <= 40):
+            raise MapError('Tên lộ trình phải dài 1-40 ký tự')
+        rt['name'] = name
+    if 'steps' in data or not base:
+        steps = data.get('steps')
+        if not isinstance(steps, list) or not steps:
+            raise MapError('Lộ trình cần ít nhất 1 điểm')
+        if len(steps) > MAX_ROUTE_STEPS:
+            raise MapError(f'Lộ trình tối đa {MAX_ROUTE_STEPS} điểm')
+        for sid in steps:
+            if sid not in valid_ids:
+                raise MapError('Lộ trình chứa điểm không tồn tại (có thể đã bị xóa)')
+        rt['steps'] = list(steps)
+    if 'loop' in data or not base:
+        rt['loop'] = bool(data.get('loop', False))
+    return rt
+
+
 # ------------------------------------------------------------------------ store
 class MapStore:
     def __init__(self, maps_dir):
@@ -189,6 +215,7 @@ class MapStore:
             'mtime': int(max(ypath.stat().st_mtime, img_path.stat().st_mtime)),
             'has_posegraph': (ypath.parent / f'{name}.posegraph').is_file(),
             'waypoints': len(self.get_waypoints(name)),
+            'routes': len(self.get_routes(name)),
             'negate': int(meta.get('negate', 0)),
             'occupied_thresh': float(meta.get('occupied_thresh', 0.65)),
             'free_thresh': float(meta.get('free_thresh', 0.25)),
@@ -294,9 +321,79 @@ class MapStore:
             if len(kept) == len(wps):
                 raise MapError('Không tìm thấy điểm')
             self._save_waypoints(name, kept)
+            routes = self.get_routes(name)   # gỡ điểm đã xóa khỏi mọi lộ trình
+            changed = False
+            for rt in routes:
+                steps = [sid for sid in rt.get('steps', []) if sid != wid]
+                if len(steps) != len(rt.get('steps', [])):
+                    rt['steps'] = steps
+                    changed = True
+            if changed:
+                self._save_routes(name, routes)
 
     def find_waypoint(self, name, wid):
         for w in self.get_waypoints(name):
             if w.get('id') == wid:
                 return w
         return None
+
+    # -- lộ trình
+    def _routes_path(self, name):
+        return self.map_dir(name) / 'routes.json'
+
+    def get_routes(self, name):
+        path = self._routes_path(name)
+        with self._lock:
+            if not path.is_file():
+                return []
+            try:
+                data = json.loads(path.read_text())
+                return data if isinstance(data, list) else []
+            except (OSError, ValueError):
+                return []
+
+    def _save_routes(self, name, routes):
+        path = self._routes_path(name)
+        tmp = path.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(routes, ensure_ascii=False, indent=2))
+        os.replace(tmp, path)
+
+    def _valid_wp_ids(self, name):
+        return {w.get('id') for w in self.get_waypoints(name)}
+
+    def add_route(self, name, data):
+        if not self.exists(name):
+            raise MapError(f'Không tìm thấy bản đồ "{name}"')
+        with self._lock:
+            rt = clean_route(data, self._valid_wp_ids(name))
+            routes = self.get_routes(name)
+            if any(r.get('name') == rt['name'] for r in routes):
+                raise MapError(f'Đã có lộ trình tên "{rt["name"]}"')
+            rt['id'] = uuid.uuid4().hex[:8]
+            routes.append(rt)
+            self._save_routes(name, routes)
+        return rt
+
+    def update_route(self, name, rid, data):
+        with self._lock:
+            routes = self.get_routes(name)
+            for i, r in enumerate(routes):
+                if r.get('id') == rid:
+                    new = clean_route(data, self._valid_wp_ids(name), base=r)
+                    if any(o.get('name') == new['name'] and o.get('id') != rid for o in routes):
+                        raise MapError(f'Đã có lộ trình tên "{new["name"]}"')
+                    routes[i] = new
+                    self._save_routes(name, routes)
+                    return new
+        raise MapError('Không tìm thấy lộ trình')
+
+    def delete_route(self, name, rid):
+        with self._lock:
+            routes = self.get_routes(name)
+            kept = [r for r in routes if r.get('id') != rid]
+            if len(kept) == len(routes):
+                raise MapError('Không tìm thấy lộ trình')
+            self._save_routes(name, kept)
+
+    def find_route(self, name, rid):
+        return next((r for r in self.get_routes(name) if r.get('id') == rid), None)

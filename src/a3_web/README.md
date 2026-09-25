@@ -1,7 +1,7 @@
 # a3_web — điều khiển robot A3 hoàn toàn bằng web
 
 Mở trình duyệt là dùng được robot: **quét bản đồ, lưu bản đồ, chọn bản đồ, tạo điểm đến, bấm để robot tự
-đi (Nav2), lái tay, hàng đợi giao đồ** — không cần tự gõ các lệnh `ros2 launch` cho bringup / SLAM / Nav2.
+đi (Nav2), lái tay, lộ trình nhiều điểm** — không cần tự gõ các lệnh `ros2 launch` cho bringup / SLAM / Nav2.
 Web tự bật/tắt các stack đó giúp bạn (chính là các launch có sẵn trong `a3_bringup` và `atlas_slam`).
 
 | Quét SLAM (bản đồ hiện dần) | Điều hướng (waypoint, đường đi, tiến độ) |
@@ -37,8 +37,12 @@ Mở `http://<ip-robot>:8080` (địa chỉ được in ra ở terminal). Đổi
    Loại điểm: Bàn ăn / Nhà bếp / Trạm sạc / Điểm.
 5. **Đi tới** — công cụ **Đi tới** (nhấn-kéo chọn điểm + hướng đích), hoặc bấm nút điểm ở khung *Đi nhanh tới điểm*.
    Thấy đường đi kế hoạch (nét đứt), tiến độ, khoảng cách còn lại; **Hủy mục tiêu** bất cứ lúc nào.
-6. **Nhiệm vụ giao đồ** — tab *Nhiệm vụ*: xếp hàng nhiều điểm, robot chạy lần lượt; tới nơi thì chờ bạn bấm **Đã giao**
-   rồi mới đi tiếp (tắt được), tuỳ chọn tự về Bếp/Trạm sạc khi hết việc.
+6. **Lộ trình** — tab *Lộ trình* → **Tạo lộ trình**: đặt tên, bấm **+** ở các điểm có sẵn để thêm vào (một điểm có thể
+   xuất hiện nhiều lần), sắp xếp bằng **kéo-thả** hoặc nút ▲▼, tuỳ chọn *Lặp lại liên tục*, rồi **Lưu** (lưu theo từng bản đồ).
+   Ở trang **Điều khiển**, khung *LỘ TRÌNH* liệt kê các lộ trình đã lưu — bấm **Chạy** để robot đi lần lượt qua các điểm
+   (đường đi và số thứ tự hiện trên bản đồ; nút 👁 để xem trước). Trong lúc chạy có **Tạm dừng / Dừng**; tới mỗi điểm robot
+   chờ bạn bấm **Đã giao - đi tiếp** (tắt được), tuỳ chọn tự về Bếp/Trạm sạc khi xong. Một bước lỗi/bị hủy thì dừng cả lộ trình.
+   Chỉ chạy được khi đang ở chế độ Điều hướng, Nav2 sẵn sàng và đã đặt vị trí ban đầu.
 
 **E-STOP** (góc phải-trên): hủy mục tiêu, ép `/cmd_vel = 0` liên tục và chặn mọi lệnh cho tới khi bấm **Nhả E-STOP**.
 Đây là dừng bằng *phần mềm* — vẫn cần nút dừng khẩn cấp phần cứng.
@@ -66,11 +70,12 @@ Mở `http://<ip-robot>:8080` (địa chỉ được in ra ở terminal). Đổi
 <maps_dir>/<tên>/<tên>.pgm         ảnh occupancy grid
 <maps_dir>/<tên>/<tên>.posegraph   (tuỳ chọn) slam_toolbox serialize_map
 <maps_dir>/<tên>/waypoints.json    waypoint do web quản lý
+<maps_dir>/<tên>/routes.json       lộ trình (danh sách id waypoint theo thứ tự)
 ```
 
 `maps_dir` mặc định tự tìm `src/a3_maps` (đúng thư mục có sẵn `map1` của bạn), rồi `~/a3_maps`. Tên bản đồ chỉ gồm
 chữ/số/`_`/`-` (tối đa 40 ký tự). Bản đồ tạo bằng `map_saver_cli` thủ công theo layout trên cũng tự hiện trong web.
-Cài đặt (controller, tuỳ chọn hàng đợi, bản đồ đang chọn) lưu ở `~/.a3_web/settings.json`.
+Cài đặt (controller, tuỳ chọn lộ trình, bản đồ đang chọn) lưu ở `~/.a3_web/settings.json`.
 
 ## Kiến trúc
 
@@ -83,7 +88,7 @@ Trình duyệt ──HTTP/WS──▶ server.py (aiohttp)  ── AppState: ch�
                                      TF map/odom→base ─▶ pose        /scan ─▶ điểm lidar (đã đổi sang khung map)
                                      /map ─▶ bản đồ live (PNG)       /plan ─▶ đường đi   /odom ─▶ vận tốc
                                      /cmd_vel ◀─ teleop (watchdog 0.4s)   /initialpose ◀─ vị trí ban đầu
-                                     action navigate_to_pose ◀─ goal / hủy / feedback     tasks.py ─ hàng đợi nhiệm vụ
+                                     action navigate_to_pose ◀─ goal / hủy / feedback     tasks.py ─ chạy lộ trình
 ```
 
 Chi tiết đáng biết:
@@ -124,10 +129,12 @@ Mọi phản hồi dạng `{"ok": true, ...}` hoặc `{"ok": false, "error": "..
 | GET | `/api/maps` · POST `/api/maps/select` · POST `/api/maps/save` `{name, overwrite?}` | danh sách / chọn / lưu bản đồ |
 | GET/DELETE | `/api/maps/{name}/image.png` · `/download` (zip) · `DELETE /api/maps/{name}` | ảnh, tải về, xóa |
 | GET | `/api/live_map.png` | bản đồ SLAM đang quét |
-| GET/POST | `/api/maps/{name}/waypoints` · PUT/DELETE `.../{id}` | waypoint |
+| GET/POST | `/api/maps/{name}/waypoints` · PUT/DELETE `.../{id}` | waypoint (xóa điểm sẽ tự gỡ khỏi các lộ trình) |
+| GET/POST | `/api/maps/{name}/routes` `{name, steps:[waypoint_id...], loop?}` · PUT/DELETE `.../{id}` | lộ trình |
+| POST | `/api/routes/{id}/run` · `/api/routes/stop` | chạy / dừng lộ trình |
 | POST | `/api/nav/goal` `{x,y,theta}` hoặc `{waypoint_id}` · `/api/nav/cancel` · `/api/initialpose` | điều hướng |
 | POST | `/api/estop` `{on}` | E-STOP |
-| GET/POST/DELETE | `/api/tasks` · `/api/tasks/{id}/confirm` · `/api/tasks/clear` · `/api/tasks/pause` | hàng đợi nhiệm vụ |
+| POST | `/api/tasks/{id}/confirm` · `/api/tasks/clear` · `/api/tasks/pause` | xác nhận đã giao / xóa / tạm dừng các bước của lộ trình đang chạy (`/api/tasks` đơn lẻ vẫn còn cho tích hợp ngoài) |
 | POST | `/api/settings` `{controller?, return_home?, require_confirm?}` | cài đặt |
 
 Ví dụ (từ máy khác): `curl -X POST http://robot:8080/api/nav/goal -H 'Content-Type: application/json' -d '{"x":1.2,"y":0.5,"theta":0}'`
@@ -167,9 +174,9 @@ stack thật (slam_toolbox/Nav2) lên trên — cách đã dùng để kiểm th
 
 ## Kiểm thử đã chạy
 
-- `python3 -m pytest test/` (13 test, không cần ROS): đọc/ghi bản đồ + PNG + waypoint, quản lý process (chạy/tắt/chạy ngoài/lỗi/quote tham số/dọn nhóm tiến trình).
-- Kịch bản API đầy đủ trên robot giả (48 bước): quét → lưu → waypoint → điều hướng → hủy → nhiệm vụ → E-STOP → xóa map.
-- Kịch bản giao diện trong Chrome headless (22 bước, 0 lỗi console): phím W/A/D, nhấn-kéo đặt vị trí ban đầu / điểm / goal, modal, E-STOP; bản điện thoại không tràn ngang.
+- `python3 -m pytest test/` (20 test, không cần ROS): đọc/ghi bản đồ + PNG + waypoint + lộ trình, chạy lộ trình (xác nhận/lặp/lỗi/E-STOP/về nhà), quản lý process (chạy/tắt/chạy ngoài/lỗi/quote tham số/dọn nhóm tiến trình).
+- Kịch bản API đầy đủ trên robot giả (63 bước): quét → lưu → waypoint → điều hướng → hủy → lộ trình (tạo/sửa/chạy/dừng/xóa) → E-STOP → xóa map.
+- Kịch bản giao diện trong Chrome headless (40 bước, 0 lỗi console): phím W/A/D, nhấn-kéo đặt vị trí ban đầu / điểm / goal, tạo-sắp xếp-lưu-chạy lộ trình, modal, E-STOP; bản điện thoại không tràn ngang.
 - **Stack thật** (`atlas_slam`: slam_toolbox + Nav2 + AMCL thật, phần cứng giả — 18 bước): vẽ map, lưu kèm posegraph (1.3 s), chuyển sang Nav2, `initialpose`, goal `succeeded`, tắt sạch không sót node.
 
 Chưa kiểm thử trên robot phần cứng thật (ESP32/RPLidar) — bước đầu nên chạy chậm và có người đứng cạnh nút dừng khẩn cấp.
@@ -202,7 +209,7 @@ a3_web/
   a3_web/ros_bridge.py      node ROS2: TF, scan, map, plan, teleop, E-STOP, action Nav2
   a3_web/process_manager.py bật/tắt stack như subprocess
   a3_web/maps.py            bản đồ, PNG, waypoint
-  a3_web/tasks.py           hàng đợi nhiệm vụ
+  a3_web/tasks.py           chạy lộ trình
   a3_web/tools/             fake_robot, fake_stack (thử/kiểm thử)
   static/                   index.html, app.js, vendor/ (Tailwind + Lucide, xem vendor/README.md)
   launch/                   web.launch.py, demo.launch.py

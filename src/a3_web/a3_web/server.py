@@ -452,6 +452,66 @@ def create_app(state):
         state.store.delete_waypoint(request.match_info['name'], request.match_info['wid'])
         return ok()
 
+    # ------------------------------------------------------------------ lộ trình
+    def map_or_404(name):
+        if not state.store.exists(name):
+            raise ApiError(f'Không tìm thấy bản đồ "{name}"', 404)
+        return name
+
+    @routes.get('/api/maps/{name}/routes')
+    async def route_list(request):
+        return ok(routes=state.store.get_routes(map_or_404(request.match_info['name'])))
+
+    @routes.post('/api/maps/{name}/routes')
+    async def route_add(request):
+        return ok(route=state.store.add_route(request.match_info['name'], await body(request)))
+
+    @routes.put('/api/maps/{name}/routes/{rid}')
+    async def route_update(request):
+        return ok(route=state.store.update_route(
+            request.match_info['name'], request.match_info['rid'], await body(request)))
+
+    @routes.delete('/api/maps/{name}/routes/{rid}')
+    async def route_delete(request):
+        name, rid = request.match_info['name'], request.match_info['rid']
+        run = state.bridge.tasks.run_snapshot()
+        if run and run['route_id'] == rid:
+            raise ApiError('Lộ trình đang chạy - dừng lộ trình trước khi xóa', 409)
+        state.store.delete_route(name, rid)
+        return ok()
+
+    @routes.post('/api/routes/stop')
+    async def route_stop(request):
+        state.bridge.tasks.stop_run()
+        return ok()
+
+    @routes.post('/api/routes/{rid}/run')
+    async def route_run(request):
+        rid = request.match_info['rid']
+        mname = state.active_map or state.selected_map
+        if state.derive_mode() != 'navigation' or not mname:
+            raise ApiError('Hãy vào chế độ Điều hướng (chọn "Điều hướng" trên một bản đồ) trước khi chạy lộ trình', 409)
+        if not state.bridge.nav_ready():
+            raise ApiError('Nav2 chưa sẵn sàng - đợi Nav2 khởi động xong', 409)
+        if not (state.bridge.pose['valid'] and state.bridge.pose['frame'] == state.bridge.cfg['map_frame']):
+            raise ApiError('Robot chưa có vị trí trên bản đồ - đặt "Vị trí ban đầu" trước', 409)
+        if state.bridge.estop:
+            raise ApiError('E-STOP đang bật - nhả E-STOP trước', 409)
+        route = state.store.find_route(mname, rid)
+        if route is None:
+            raise ApiError('Không tìm thấy lộ trình', 404)
+        wps = {w['id']: w for w in state.store.get_waypoints(mname)}
+        try:
+            targets = [{'name': wps[sid]['name'], 'x': wps[sid]['x'], 'y': wps[sid]['y'],
+                        'theta': wps[sid].get('theta', 0.0)} for sid in route['steps']]
+        except KeyError:
+            raise ApiError('Lộ trình chứa điểm đã bị xóa - hãy sửa lại lộ trình')
+        if not targets:
+            raise ApiError('Lộ trình chưa có điểm nào')
+        if not state.bridge.tasks.start_run(route, targets):
+            raise ApiError('Đang có lộ trình chạy - dừng lộ trình đó trước', 409)
+        return ok()
+
     # ------------------------------------------------------------- chế độ + stack
     @routes.post('/api/mode')
     async def set_mode(request):

@@ -71,7 +71,7 @@
                 <button data-tab="dashboard" onclick="switchTab('dashboard')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="layout-dashboard" class="w-4 h-4"></i><span>Điều khiển</span></button>
                 <button data-tab="maps" onclick="switchTab('maps')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="map" class="w-4 h-4"></i><span>Bản đồ (SLAM)</span></button>
                 <button data-tab="waypoints" onclick="switchTab('waypoints')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="map-pin" class="w-4 h-4"></i><span>Điểm đến (Waypoints)</span></button>
-                <button data-tab="tasks" onclick="switchTab('tasks')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="list-todo" class="w-4 h-4"></i><span>Nhiệm vụ</span><span id="task-count-badge" class="ml-auto bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">0</span></button>
+                <button data-tab="routes" onclick="switchTab('routes')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="route" class="w-4 h-4"></i><span>Lộ trình</span><span id="route-count-badge" class="ml-auto bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded-full font-mono font-bold">0</span></button>
                 <button data-tab="system" onclick="switchTab('system')" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm transition-all"><i data-lucide="settings" class="w-4 h-4"></i><span>Hệ thống</span></button>
             </nav>
         </div>
@@ -142,7 +142,7 @@
                     </div>
 
                     <!-- tool hint -->
-                    <div id="tool-hint" class="hidden absolute top-3 right-3 z-10 bg-slate-900/85 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none max-w-[45%]"></div>
+                    <div id="tool-hint" class="hidden absolute top-[104px] left-3 z-10 bg-slate-900/85 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none max-w-[70%]"></div>
 
                     <!-- waypoint card -->
                     <div id="wp-card" class="hidden absolute bottom-3 right-3 z-10 bg-white/95 backdrop-blur p-3 rounded-xl border border-slate-200 shadow-lg text-xs space-y-2 w-60"></div>
@@ -171,6 +171,15 @@
                         <div class="w-full bg-slate-200 rounded-full h-1.5"><div id="nav-progress" class="bg-blue-600 h-1.5 rounded-full transition-all" style="width:0%"></div></div>
                         <div id="nav-extra" class="text-[11px] text-slate-500 font-mono"></div>
                         <button id="btn-cancel-nav" onclick="cancelNav()" class="btn btn-danger w-full hidden"><i data-lucide="x" class="w-4 h-4"></i>Hủy mục tiêu</button>
+                    </div>
+
+                    <div class="p-4 border-b border-slate-200 space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2"><i data-lucide="list-todo" class="w-4 h-4 text-purple-600"></i>LỘ TRÌNH</h2>
+                            <button onclick="switchTab('routes')" class="text-xs text-blue-600 hover:underline font-semibold">Tạo / sửa</button>
+                        </div>
+                        <div id="run-card-dash"></div>
+                        <div id="routes-panel" class="space-y-2"></div>
                     </div>
 
                     <div class="p-4 border-b border-slate-200">
@@ -246,31 +255,50 @@
                 </div>
             </div>
 
-            <!-- ======== TAB: Nhiệm vụ ======== -->
-            <div id="tab-tasks" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
+            <!-- ======== TAB: Lộ trình ======== -->
+            <div id="tab-routes" class="tab-content flex-1 flex-col p-4 md:p-6 overflow-y-auto space-y-6">
                 <div class="flex flex-wrap justify-between items-center gap-3">
                     <div>
-                        <h2 class="text-xl font-bold text-slate-900">Hàng đợi nhiệm vụ giao đồ</h2>
-                        <p class="text-sm text-slate-500">Robot chạy lần lượt từng điểm; tới nơi thì chờ bạn xác nhận đã giao rồi mới đi tiếp.</p>
+                        <h2 class="text-xl font-bold text-slate-900">Lộ trình</h2>
+                        <p class="text-sm text-slate-500">Ghép các điểm có sẵn thành một hành trình theo thứ tự, lưu lại, rồi bấm <b>Chạy</b> (ở đây hoặc ở trang Điều khiển). Bản đồ: <span id="route-map-name" class="font-semibold text-slate-800">-</span></p>
                     </div>
-                    <div class="flex gap-2">
-                        <button id="btn-pause" onclick="togglePause()" class="btn btn-soft"><i data-lucide="pause" class="w-4 h-4"></i><span>Tạm dừng hàng đợi</span></button>
-                        <button onclick="clearTasks(true)" class="btn btn-soft">Xóa việc đã xong</button>
-                        <button onclick="clearTasks(false)" class="btn btn-danger">Hủy toàn bộ</button>
+                    <button id="btn-new-route" onclick="newRoute()" class="btn btn-primary"><i data-lucide="plus" class="w-4 h-4"></i>Tạo lộ trình</button>
+                </div>
+
+                <div id="run-card-tab"></div>
+
+                <div id="route-editor" class="hidden bg-white border-2 border-blue-300 rounded-xl p-4 shadow-md space-y-4">
+                    <div class="flex flex-wrap gap-4 items-end">
+                        <div class="flex-1 min-w-[220px]"><label class="text-xs text-slate-600 font-medium">Tên lộ trình</label><input id="re-name" class="field" maxlength="40" placeholder="Giao đồ tầng 1"></div>
+                        <label class="flex items-center gap-2 text-sm text-slate-700 pb-2"><input id="re-loop" type="checkbox" class="w-4 h-4 accent-blue-600"> Lặp lại liên tục</label>
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs font-bold text-slate-500 mb-2">ĐIỂM CÓ SẴN <span class="font-normal">(bấm + để thêm vào cuối lộ trình, thêm được nhiều lần)</span></div>
+                            <div id="re-available" class="space-y-1.5 max-h-72 overflow-y-auto pr-1"></div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-slate-500 mb-2">THỨ TỰ ĐI <span class="font-normal">(kéo thả hoặc dùng ▲ ▼ để sắp xếp)</span></div>
+                            <div id="re-steps" class="space-y-1.5 max-h-72 overflow-y-auto pr-1 min-h-[3rem]"></div>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <span class="text-xs text-slate-500">Đường đi xem trước được vẽ trên bản đồ ở trang Điều khiển.</span>
+                        <div class="flex gap-2">
+                            <button onclick="cancelRouteEdit()" class="btn btn-soft">Hủy</button>
+                            <button onclick="saveRoute()" class="btn btn-primary"><i data-lucide="save" class="w-4 h-4"></i>Lưu lộ trình</button>
+                        </div>
                     </div>
                 </div>
-                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                        <div><label class="text-xs text-slate-600 font-medium">Giao tới</label><select id="task-wp" class="field"></select></div>
-                        <div><label class="text-xs text-slate-600 font-medium">Ghi chú (vd: món ăn)</label><input id="task-note" class="field" maxlength="80" placeholder="Phở bò đặc biệt"></div>
-                        <button onclick="addTask()" class="btn btn-primary"><i data-lucide="plus" class="w-4 h-4"></i>Thêm nhiệm vụ</button>
-                    </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                     <div class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-700">
-                        <label class="flex items-center gap-2"><input id="chk-confirm" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Chờ xác nhận đã giao mới đi tiếp</label>
-                        <label class="flex items-center gap-2"><input id="chk-home" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Tự về Bếp/Trạm sạc khi hết việc</label>
+                        <label class="flex items-center gap-2"><input id="chk-confirm" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Chờ tôi xác nhận "Đã giao" ở mỗi điểm mới đi tiếp</label>
+                        <label class="flex items-center gap-2"><input id="chk-home" type="checkbox" class="w-4 h-4 accent-blue-600" onchange="saveTaskSettings()"> Tự về Bếp/Trạm sạc khi chạy xong lộ trình</label>
                     </div>
                 </div>
-                <div class="space-y-3" id="tasks-list"></div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4" id="routes-list"></div>
             </div>
 
             <!-- ======== TAB: Hệ thống ======== -->
@@ -309,7 +337,7 @@
             <button data-tab="dashboard" onclick="switchTab('dashboard')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="layout-dashboard" class="w-5 h-5"></i>Điều khiển</button>
             <button data-tab="maps" onclick="switchTab('maps')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="map" class="w-5 h-5"></i>Bản đồ</button>
             <button data-tab="waypoints" onclick="switchTab('waypoints')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="map-pin" class="w-5 h-5"></i>Điểm</button>
-            <button data-tab="tasks" onclick="switchTab('tasks')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="list-todo" class="w-5 h-5"></i>Nhiệm vụ</button>
+            <button data-tab="routes" onclick="switchTab('routes')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="route" class="w-5 h-5"></i>Lộ trình</button>
             <button data-tab="system" onclick="switchTab('system')" class="mob-btn flex flex-col items-center text-[10px] px-2 py-1 rounded-lg text-slate-600"><i data-lucide="settings" class="w-5 h-5"></i>Hệ thống</button>
         </nav>
     </main>

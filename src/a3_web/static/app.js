@@ -188,11 +188,13 @@ function onState(d) {
         else if (n.state !== 'canceled') toast(`${NAV_LABEL[n.state]}${name ? ' -' + name : ''}`, 'error');
     }
 
+    announceRunEnd(prev);
     renderHeader();
     renderHud();
     renderNavCard();
     renderSensors();
-    renderTasks();
+    renderRun();
+    renderRoutes();
     renderStacks(false);
     renderSideInfo();
     if (activeTab === 'maps') renderMaps();
@@ -304,20 +306,22 @@ async function loadMapContext(name) {
     lastSelected = name;
     selectedWp = null; renderWpCard();
     if (name && !mapsInfo[name]) await refreshMaps();
-    if (!name) { WP = []; renderWaypoints(); renderQuick(); renderTaskSelect(); return; }
+    if (!name) { WP = []; renderWaypoints(); renderQuick(); ROUTES = []; renderRoutes(); return; }
     try {
         const r = await api(`/api/maps/${encodeURIComponent(name)}/waypoints`);
         if (seq !== ctxSeq) return;
         WP = r.waypoints;
     } catch { WP = []; }
-    renderWaypoints(); renderQuick(); renderTaskSelect();
+    renderWaypoints(); renderQuick();
+    await reloadRoutes();
 }
 
 async function reloadWaypoints() {
     if (!S || !S.selected_map) return;
     try { WP = (await api(`/api/maps/${encodeURIComponent(S.selected_map)}/waypoints`)).waypoints; } catch { WP = []; }
     if (selectedWp && !WP.find((w) => w.id === selectedWp)) selectedWp = null;
-    renderWaypoints(); renderQuick(); renderTaskSelect(); renderWpCard();
+    renderWaypoints(); renderQuick(); renderWpCard();
+    await reloadRoutes();
 }
 
 async function selectMap(name) {
@@ -441,7 +445,6 @@ function wpRow(w) {
         <td class="p-3 font-mono text-xs text-amber-600 font-semibold">${fmt(deg(w.theta), 0)}°</td>
         <td class="p-3 text-right whitespace-nowrap space-x-1">
             <button data-act="go" data-id="${id}" class="btn btn-primary !px-2.5 !py-1" ${navReady() && !S.estop ? '' : 'disabled'} title="Đi tới điểm này">Đi tới</button>
-            <button data-act="task" data-id="${id}" class="btn btn-soft !px-2.5 !py-1" title="Thêm vào hàng đợi nhiệm vụ">+ Nhiệm vụ</button>
             <button data-act="init" data-id="${id}" class="btn btn-soft !px-2 !py-1" title="Đặt làm vị trí ban đầu của robot (AMCL)"><i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i></button>
             <button data-act="edit" data-id="${id}" class="btn btn-soft !px-2 !py-1" title="Sửa"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
             <button data-act="del" data-id="${id}" class="btn btn-danger !px-2 !py-1" title="Xóa"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
@@ -464,7 +467,6 @@ async function wpAction(action, id) {
     const w = WP.find((x) => x.id === id);
     if (!w) return;
     if (action === 'go') goToWp(id);
-    else if (action === 'task') addTaskFor(id);
     else if (action === 'init') { await act(() => api('/api/initialpose', 'POST', { x: w.x, y: w.y, theta: w.theta }), `Đã gửi vị trí ban đầu tại "${w.name}"`); }
     else if (action === 'edit') editWaypoint(w);
     else if (action === 'del') {
@@ -532,69 +534,251 @@ function renderQuick() {
 }
 $('quick-list').addEventListener('click', (e) => { const b = e.target.closest('button[data-id]'); if (b) goToWp(b.dataset.id); });
 
-// ============================================================ tab Nhiệm vụ
-function renderTaskSelect() {
-    const sel = $('task-wp');
-    const cur = sel.value;
-    sel.innerHTML = WP.map((w) => `<option value="${esc(w.id)}">${esc(w.name)} (${esc(WP_TYPE[w.type] || w.type)})</option>`).join('') || '<option value="">(chưa có điểm)</option>';
-    if (cur) sel.value = cur;
+// ============================================================ Lộ trình
+let ROUTES = [];              // lộ trình của bản đồ đang chọn
+let highlightRoute = null;    // lộ trình được bấm để xem đường đi trên bản đồ
+let editor = null;            // {id|null, name, loop, steps:[waypointId,...]} khi đang tạo/sửa
+let lastRun = null;
+
+const routePts = (steps) => steps.map((id) => WP.find((w) => w.id === id)).filter(Boolean);
+const routeById = (id) => ROUTES.find((r) => r.id === id);
+
+async function reloadRoutes() {
+    if (!S || !S.selected_map) { ROUTES = []; renderRoutes(); return; }
+    try { ROUTES = (await api(`/api/maps/${encodeURIComponent(S.selected_map)}/routes`)).routes; } catch { ROUTES = []; }
+    if (highlightRoute && !routeById(highlightRoute)) highlightRoute = null;
+    renderRoutes();
 }
-async function addTaskFor(id, note = '') {
-    await act(() => api('/api/tasks', 'POST', { waypoint_id: id, note }), 'Đã thêm nhiệm vụ');
+
+function canRun() { return navReady() && mapFrameOk() && !S.estop && !S.run; }
+function runHint() {
+    if (S.run) return 'Đang có lộ trình chạy - dừng nó trước';
+    if (S.estop) return 'E-STOP đang bật';
+    if (S.mode !== 'navigation') return 'Vào chế độ Điều hướng (tab Bản đồ → Điều hướng) để chạy lộ trình';
+    if (!S.nav.server_ready) return 'Nav2 đang khởi động...';
+    if (!mapFrameOk()) return 'Hãy đặt "Vị trí ban đầu" cho robot trên bản đồ';
+    return 'Chạy lộ trình này';
 }
-function addTask() {
-    const id = $('task-wp').value;
-    if (!id) { toast('Hãy chọn điểm giao', 'error'); return; }
-    addTaskFor(id, $('task-note').value.trim()).then(() => { $('task-note').value = ''; });
+
+function stepChips(r) {
+    const wps = r.steps.map((id) => WP.find((w) => w.id === id));
+    return wps.map((w, i) => `<span class="chip ${w ? 'chip-gray' : 'chip-red'}" style="${w ? `border-left:3px solid ${WP_COLOR[w.type] || '#64748b'}` : ''}"><b class="text-slate-500">${i + 1}</b> ${w ? esc(w.name) : '(đã xóa)'}</span>`).join('<span class="text-slate-400">→</span>')
+        + (r.loop ? '<span class="chip chip-blue">↻ lặp</span>' : '');
 }
-let tasksKey = '';
-function renderTasks() {
-    const t = S.tasks;
-    const active = t.filter((x) => ['queued', 'going', 'arrived'].includes(x.status)).length;
-    setText('task-count-badge', String(active));
-    const cc = $('chk-confirm'), ch = $('chk-home');
-    if (document.activeElement !== cc) cc.checked = S.settings.require_confirm;
-    if (document.activeElement !== ch) ch.checked = S.settings.return_home;
-    const key = JSON.stringify(t);
-    if (key === tasksKey) return;
-    tasksKey = key;
-    $('tasks-list').innerHTML = t.length ? t.map((x, i) => `
-        <div class="bg-white border border-slate-200 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-sm">
-            <div class="flex items-center space-x-4">
-                <div class="w-10 h-10 rounded-lg ${x.status === 'going' ? 'bg-blue-50 text-blue-600 border border-blue-200' : 'bg-slate-100 text-slate-500'} flex items-center justify-center font-bold">#${i + 1}</div>
-                <div>
-                    <div class="font-bold text-slate-900 text-sm">${esc(x.name)}${x.note ? ` - <span class="text-blue-600">${esc(x.note)}</span>` : ''}</div>
-                    <div class="text-xs text-slate-500 font-mono">Mã: ${esc(x.id)} · Tạo lúc ${esc(x.created)}</div>
+
+let routesKey = '';
+function renderRoutes() {
+    const key = JSON.stringify([ROUTES, WP.map((w) => [w.id, w.name, w.type]), highlightRoute, S && [S.run && S.run.route_id, canRun(), S.mode]]);
+    if (key === routesKey) return;
+    routesKey = key;
+    setText('route-count-badge', String(ROUTES.length));
+    setText('route-map-name', (S && S.selected_map) || '(chưa chọn bản đồ)');
+    const running = S && S.run ? S.run.route_id : null;
+    const ok = S && canRun();
+    const hint = S ? runHint() : '';
+
+    // ---- tab Lộ trình: thẻ đầy đủ
+    $('routes-list').innerHTML = ROUTES.length ? ROUTES.map((r) => `
+        <div class="bg-white ${running === r.id ? 'border-2 border-purple-400' : 'border border-slate-200'} rounded-xl p-4 shadow-sm space-y-3">
+            <div class="flex justify-between items-start gap-2">
+                <div><h3 class="font-bold text-slate-900 break-all">${esc(r.name)}</h3><p class="text-xs text-slate-500">${r.steps.length} điểm${r.loop ? ' · lặp liên tục' : ''}</p></div>
+                <div class="flex gap-1.5 shrink-0">
+                    <button data-act="run" data-id="${esc(r.id)}" class="btn btn-primary" ${ok ? '' : 'disabled'} title="${esc(hint)}"><i data-lucide="play" class="w-4 h-4"></i>Chạy</button>
+                    <button data-act="view" data-id="${esc(r.id)}" class="btn ${highlightRoute === r.id ? 'btn-amber' : 'btn-soft'} !px-2" title="Xem đường đi trên bản đồ"><i data-lucide="eye" class="w-4 h-4"></i></button>
+                    <button data-act="edit" data-id="${esc(r.id)}" class="btn btn-soft !px-2" title="Sửa" ${running === r.id ? 'disabled' : ''}><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                    <button data-act="del" data-id="${esc(r.id)}" class="btn btn-danger !px-2" title="Xóa" ${running === r.id ? 'disabled' : ''}><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                 </div>
             </div>
-            <div class="flex items-center gap-2">
-                <span class="chip ${TASK_CHIP[x.status]} ${x.status === 'going' ? 'animate-pulse' : ''}">${TASK_LABEL[x.status]}</span>
-                ${x.status === 'arrived' ? `<button data-act="confirm" data-id="${esc(x.id)}" class="btn btn-primary"><i data-lucide="check" class="w-4 h-4"></i>Đã giao</button>` : ''}
-                <button data-act="remove" data-id="${esc(x.id)}" class="btn btn-danger !px-2" title="${['queued', 'going', 'arrived'].includes(x.status) ? 'Hủy' : 'Xóa khỏi danh sách'}"><i data-lucide="x" class="w-4 h-4"></i></button>
-            </div>
-        </div>`).join('') : `<div class="text-center text-slate-500 border-2 border-dashed border-slate-300 rounded-xl p-10">Chưa có nhiệm vụ nào.</div>`;
+            <div class="flex flex-wrap items-center gap-1.5 text-xs">${stepChips(r)}</div>
+        </div>`).join('')
+        : `<div class="col-span-full text-center text-slate-500 border-2 border-dashed border-slate-300 rounded-xl p-10">${S && S.selected_map ? (WP.length ? 'Chưa có lộ trình nào. Bấm <b>"Tạo lộ trình"</b> rồi chọn các điểm theo thứ tự.' : 'Bản đồ này chưa có điểm nào - hãy tạo vài điểm ở tab <b>Điểm đến</b> trước.') : 'Hãy chọn hoặc quét một bản đồ trước.'}</div>`;
+
+    // ---- trang chính: danh sách gọn
+    $('routes-panel').innerHTML = ROUTES.length ? ROUTES.map((r) => `
+        <div class="flex items-center gap-2 p-2 rounded-lg border ${highlightRoute === r.id || running === r.id ? 'border-purple-300 bg-purple-50' : 'border-slate-200 bg-slate-50'}">
+            <button data-act="view" data-id="${esc(r.id)}" class="flex-1 text-left min-w-0" title="Bấm để xem đường đi trên bản đồ">
+                <div class="text-sm font-semibold text-slate-900 truncate">${esc(r.name)}</div>
+                <div class="text-[11px] text-slate-500 truncate">${r.steps.length} điểm${r.loop ? ' · ↻ lặp' : ''} · ${esc(routePts(r.steps).map((w) => w.name).join(' → '))}</div>
+            </button>
+            <button data-act="run" data-id="${esc(r.id)}" class="btn btn-primary !px-3 !py-1.5" ${ok ? '' : 'disabled'} title="${esc(hint)}"><i data-lucide="play" class="w-4 h-4"></i>Chạy</button>
+        </div>`).join('') + (ok || running ? '' : `<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">${esc(hint)}</p>`)
+        : `<p class="text-xs text-slate-500">${S && S.selected_map ? 'Chưa có lộ trình. Vào tab <b>Lộ trình</b> để tạo từ các điểm có sẵn.' : 'Chưa chọn bản đồ.'}</p>`;
     icons();
 }
-$('tasks-list').addEventListener('click', (e) => {
+function routeClick(e) {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
-    if (b.dataset.act === 'confirm') act(() => api(`/api/tasks/${b.dataset.id}/confirm`, 'POST'), 'Đã xác nhận giao xong');
-    else act(() => api(`/api/tasks/${b.dataset.id}`, 'DELETE'));
-});
-let paused = false;
-async function togglePause() {
-    paused = !paused;
-    const r = await act(() => api('/api/tasks/pause', 'POST', { paused }));
-    if (!r) { paused = !paused; return; }
-    $('btn-pause').querySelector('span').textContent = paused ? 'Tiếp tục hàng đợi' : 'Tạm dừng hàng đợi';
-    toast(paused ? 'Đã tạm dừng hàng đợi (nhiệm vụ đang chạy vẫn tiếp tục)' : 'Hàng đợi tiếp tục chạy');
+    const id = b.dataset.id;
+    if (b.dataset.act === 'run') runRoute(id);
+    else if (b.dataset.act === 'view') { highlightRoute = highlightRoute === id ? null : id; routesKey = ''; renderRoutes(); }
+    else if (b.dataset.act === 'edit') editRoute(id);
+    else if (b.dataset.act === 'del') deleteRoute(id);
 }
-async function clearTasks(finishedOnly) {
-    if (!finishedOnly && !(await confirmBox('Hủy toàn bộ nhiệm vụ?', 'Mọi nhiệm vụ đang chờ/đang chạy sẽ bị hủy.', 'Hủy toàn bộ', true))) return;
-    await act(() => api('/api/tasks/clear', 'POST', { finished_only: finishedOnly }));
+$('routes-list').addEventListener('click', routeClick);
+$('routes-panel').addEventListener('click', routeClick);
+
+async function runRoute(id) {
+    const r = routeById(id);
+    if (!r) return;
+    if (await act(() => api(`/api/routes/${id}/run`, 'POST'), `Bắt đầu lộ trình "${r.name}"`)) { highlightRoute = null; switchTab('dashboard'); }
+}
+async function stopRoute() {
+    if (!(await confirmBox('Dừng lộ trình?', 'Robot sẽ dừng lại tại chỗ và các điểm còn lại bị hủy.', 'Dừng lộ trình', true))) return;
+    await act(() => api('/api/routes/stop', 'POST'), 'Đã dừng lộ trình');
+}
+async function deleteRoute(id) {
+    const r = routeById(id);
+    if (!r || !(await confirmBox('Xóa lộ trình?', `Xóa "${esc(r.name)}"? (các điểm vẫn được giữ)`, 'Xóa', true))) return;
+    if (await act(() => api(`/api/maps/${encodeURIComponent(S.selected_map)}/routes/${id}`, 'DELETE'), 'Đã xóa lộ trình')) reloadRoutes();
+}
+async function confirmStep(taskId) { await act(() => api(`/api/tasks/${taskId}/confirm`, 'POST'), 'Đã xác nhận giao xong'); }
+async function togglePause() {
+    const paused = !(S.run && S.run.paused);
+    await act(() => api('/api/tasks/pause', 'POST', { paused }), paused ? 'Đã tạm dừng: robot dừng sau bước hiện tại' : 'Lộ trình tiếp tục');
 }
 function saveTaskSettings() {
     act(() => api('/api/settings', 'POST', { require_confirm: $('chk-confirm').checked, return_home: $('chk-home').checked }));
+}
+
+// ---- thẻ trạng thái đang chạy
+let runKey = '';
+function stepStatusChip(t) { return `<span class="chip ${TASK_CHIP[t.status]} ${t.status === 'going' ? 'animate-pulse' : ''}">${TASK_LABEL[t.status]}</span>`; }
+function runCardHtml(full) {
+    const r = S.run;
+    const steps = S.tasks.filter((t) => t.route_step);
+    if (!r && !(full && steps.length)) return '';
+    let head = '', actions = '';
+    if (r) {
+        const cur = r.current;
+        const pct = r.total ? (r.done / r.total) * 100 : 0;
+        head = `
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="min-w-0"><div class="text-[11px] font-bold text-purple-700 uppercase">Đang chạy lộ trình${r.loop ? ` · vòng ${r.cycle}` : ''}${r.paused ? ' · TẠM DỪNG' : ''}</div>
+                <div class="font-bold text-slate-900 truncate">${esc(r.route_name)}</div></div>
+                <div class="text-xs font-mono text-slate-600">${r.done}/${r.total} điểm</div>
+            </div>
+            <div class="w-full bg-slate-200 rounded-full h-1.5"><div class="bg-purple-600 h-1.5 rounded-full transition-all" style="width:${pct}%"></div></div>
+            <div class="text-xs text-slate-700">${cur ? `Bước ${cur.step}/${r.total} → <b>${esc(cur.name)}</b> (${TASK_LABEL[cur.status]})` : (r.paused ? 'Đang tạm dừng' : 'Đang chuẩn bị bước tiếp theo...')}</div>`;
+        actions = `<div class="flex flex-wrap gap-2">
+            ${cur && cur.status === 'arrived' ? `<button data-act="confirm" data-id="${esc(cur.id)}" class="btn btn-primary flex-1"><i data-lucide="check" class="w-4 h-4"></i>Đã giao - đi tiếp</button>` : ''}
+            <button data-act="pause" class="btn btn-soft">${r.paused ? 'Tiếp tục' : 'Tạm dừng'}</button>
+            <button data-act="stop" class="btn btn-danger"><i data-lucide="square" class="w-4 h-4"></i>Dừng</button></div>`;
+    } else {
+        head = `<div class="flex justify-between items-center"><div class="text-[11px] font-bold text-slate-500 uppercase">Lượt chạy gần nhất</div><button data-act="clear" class="text-xs text-blue-600 hover:underline font-semibold">Xóa</button></div>`;
+    }
+    const list = full ? `<div class="space-y-1.5">${steps.map((t) => `<div class="flex items-center justify-between gap-2 text-sm bg-slate-50 rounded-lg px-3 py-1.5"><span class="truncate"><b class="text-slate-400 font-mono mr-2">${t.route_step}</b>${esc(t.name)}</span>${stepStatusChip(t)}</div>`).join('')}</div>` : '';
+    return `<div class="bg-white ${r ? 'border-2 border-purple-300' : 'border border-slate-200'} rounded-xl p-3 shadow-sm space-y-2.5">${head}${actions}${list}</div>`;
+}
+function renderRun() {
+    const cc = $('chk-confirm'), ch = $('chk-home');
+    if (document.activeElement !== cc) cc.checked = S.settings.require_confirm;
+    if (document.activeElement !== ch) ch.checked = S.settings.return_home;
+    const key = JSON.stringify([S.run, S.tasks]);
+    if (key === runKey) return;
+    runKey = key;
+    $('run-card-dash').innerHTML = runCardHtml(false);
+    $('run-card-tab').innerHTML = runCardHtml(true);
+    icons();
+}
+function runClick(e) {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'confirm') confirmStep(b.dataset.id);
+    else if (b.dataset.act === 'pause') togglePause();
+    else if (b.dataset.act === 'stop') stopRoute();
+    else if (b.dataset.act === 'clear') act(() => api('/api/tasks/clear', 'POST', { finished_only: true }));
+}
+$('run-card-dash').addEventListener('click', runClick);
+$('run-card-tab').addEventListener('click', runClick);
+
+function announceRunEnd(prev) {
+    if (!prev || !prev.run || S.run) return;
+    const name = prev.run.route_name;
+    const st = S.tasks.filter((t) => t.route_step).map((t) => t.status);
+    if (st.includes('failed')) toast(`Lộ trình "${name}" dừng: robot không tới được một điểm`, 'error');
+    else if (st.includes('cancelled')) toast(`Đã dừng lộ trình "${name}"`);
+    else toast(`Hoàn thành lộ trình "${name}"`, 'ok');
+}
+
+// ---- trình tạo / sửa lộ trình
+function newRoute() {
+    if (!S.selected_map) { toast('Hãy chọn hoặc quét một bản đồ trước', 'error'); return; }
+    if (!WP.length) { toast('Bản đồ này chưa có điểm nào - tạo điểm ở tab "Điểm đến" trước', 'error'); return; }
+    editor = { id: null, name: '', loop: false, steps: [] };
+    openEditor();
+}
+function editRoute(id) {
+    const r = routeById(id);
+    if (!r) return;
+    editor = { id: r.id, name: r.name, loop: r.loop, steps: r.steps.filter((sid) => WP.find((w) => w.id === sid)) };
+    openEditor();
+}
+function openEditor() {
+    $('route-editor').classList.remove('hidden');
+    $('re-name').value = editor.name;
+    $('re-loop').checked = editor.loop;
+    renderEditor();
+    $('route-editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    $('re-name').focus();
+}
+function cancelRouteEdit() { editor = null; $('route-editor').classList.add('hidden'); }
+function renderEditor() {
+    if (!editor) return;
+    $('re-available').innerHTML = WP.map((w) => `
+        <div class="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${WP_COLOR[w.type] || '#64748b'}"></span>
+            <div class="flex-1 min-w-0"><div class="text-sm font-semibold truncate">${esc(w.name)}</div><div class="text-[11px] text-slate-500">${esc(WP_TYPE[w.type] || w.type)}</div></div>
+            <button data-add="${esc(w.id)}" class="btn btn-primary !px-2.5 !py-1" title="Thêm vào cuối lộ trình"><i data-lucide="plus" class="w-4 h-4"></i></button>
+        </div>`).join('');
+    $('re-steps').innerHTML = editor.steps.length ? editor.steps.map((id, i) => {
+        const w = WP.find((x) => x.id === id);
+        return `<div draggable="true" data-i="${i}" class="flex items-center gap-2 p-2 rounded-lg border border-purple-200 bg-purple-50 cursor-grab">
+            <span class="w-6 h-6 rounded-full bg-purple-600 text-white text-xs font-bold flex items-center justify-center shrink-0">${i + 1}</span>
+            <div class="flex-1 min-w-0 text-sm font-semibold truncate">${w ? esc(w.name) : '(đã xóa)'}</div>
+            <button data-mv="-1" data-i="${i}" class="btn btn-soft !px-2 !py-1" ${i === 0 ? 'disabled' : ''} title="Lên">▲</button>
+            <button data-mv="1" data-i="${i}" class="btn btn-soft !px-2 !py-1" ${i === editor.steps.length - 1 ? 'disabled' : ''} title="Xuống">▼</button>
+            <button data-rm="${i}" class="btn btn-danger !px-2 !py-1" title="Bỏ khỏi lộ trình"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>`;
+    }).join('') : `<div class="text-xs text-slate-500 border-2 border-dashed border-slate-300 rounded-lg p-4 text-center">Chưa có điểm nào. Bấm <b>+</b> ở danh sách bên trái theo thứ tự robot cần đi.</div>`;
+    icons();
+}
+$('re-available').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-add]');
+    if (b && editor) { editor.steps.push(b.dataset.add); renderEditor(); }
+});
+$('re-loop').addEventListener('change', () => { if (editor) editor.loop = $('re-loop').checked; });
+$('re-steps').addEventListener('click', (e) => {
+    if (!editor) return;
+    const mv = e.target.closest('button[data-mv]'), rm = e.target.closest('button[data-rm]');
+    if (mv) moveStep(+mv.dataset.i, +mv.dataset.i + +mv.dataset.mv);
+    else if (rm) { editor.steps.splice(+rm.dataset.rm, 1); renderEditor(); }
+});
+function moveStep(from, to) {
+    if (!editor || to < 0 || to >= editor.steps.length || from === to) return;
+    const [x] = editor.steps.splice(from, 1);
+    editor.steps.splice(to, 0, x);
+    renderEditor();
+}
+let dragFrom = null;
+$('re-steps').addEventListener('dragstart', (e) => { const it = e.target.closest('[data-i]'); if (it) { dragFrom = +it.dataset.i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragFrom)); } });
+$('re-steps').addEventListener('dragover', (e) => { if (dragFrom !== null) e.preventDefault(); });
+$('re-steps').addEventListener('drop', (e) => {
+    e.preventDefault();
+    const it = e.target.closest('[data-i]');
+    if (dragFrom !== null && it) moveStep(dragFrom, +it.dataset.i);
+    dragFrom = null;
+});
+$('re-steps').addEventListener('dragend', () => { dragFrom = null; });
+
+async function saveRoute() {
+    if (!editor) return;
+    const name = $('re-name').value.trim();
+    if (!name) { toast('Hãy đặt tên cho lộ trình', 'error'); $('re-name').focus(); return; }
+    if (!editor.steps.length) { toast('Lộ trình cần ít nhất 1 điểm', 'error'); return; }
+    const body = { name, steps: editor.steps, loop: $('re-loop').checked };
+    const base = `/api/maps/${encodeURIComponent(S.selected_map)}/routes`;
+    const r = await act(() => (editor.id ? api(`${base}/${editor.id}`, 'PUT', body) : api(base, 'POST', body)), `Đã lưu lộ trình "${name}"`);
+    if (r) { cancelRouteEdit(); await reloadRoutes(); }
 }
 
 // ============================================================ tab Hệ thống
@@ -757,6 +941,45 @@ function drawGrid() {
     ctx.fillText(`${step} m/ô`, 8, ch - 8);
 }
 
+function drawRoutePath() {
+    let steps = null, loop = false, running = false;
+    if (S.run) { const r = routeById(S.run.route_id); if (r) { steps = r.steps; loop = r.loop; running = true; } }
+    if (!steps && editor) { steps = editor.steps; loop = editor.loop; }
+    if (!steps && highlightRoute) { const r = routeById(highlightRoute); if (r) { steps = r.steps; loop = r.loop; } }
+    if (!steps || !steps.length) return;
+    const P = steps.map((id) => { const w = WP.find((x) => x.id === id); return w ? w2s(w.x, w.y) : null; });
+    const status = {};
+    if (running) S.tasks.forEach((t) => { if (t.route_step) status[t.route_step] = t.status; });
+
+    const seg = (a, b, alpha) => {
+        if (!a || !b) return;
+        ctx.strokeStyle = `rgba(124,58,237,${alpha})`; ctx.fillStyle = `rgba(124,58,237,${alpha})`;
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 40) {   // mũi tên chỉ chiều ở giữa đoạn
+            ctx.save(); ctx.setLineDash([]); ctx.translate(mx, my); ctx.rotate(ang);
+            ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.restore();
+        }
+    };
+    ctx.save(); ctx.lineWidth = 3; ctx.setLineDash([9, 6]);
+    for (let i = 0; i + 1 < P.length; i++) seg(P[i], P[i + 1], 0.85);
+    if (loop && P.length > 2) seg(P[P.length - 1], P[0], 0.35);
+    ctx.restore();
+
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+    steps.forEach((id, i) => {
+        if (!P[i]) return;
+        const k = steps.slice(0, i).filter((x) => x === id).length;
+        const bx = P[i][0] + 15 + 18 * k, by = P[i][1] - 15;
+        const st = status[i + 1];
+        ctx.fillStyle = st === 'done' ? '#16a34a' : (st === 'going' || st === 'arrived') ? '#2563eb' : '#7c3aed';
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.fillText(String(i + 1), bx, by + 0.5);
+    });
+    ctx.restore();
+}
+
 function drawWaypoints() {
     ctx.textAlign = 'center';
     for (const w of WP) {
@@ -821,6 +1044,7 @@ function drawFrame() {
         ctx.fillStyle = '#f43f5e';
         for (const [x, y] of S.scan.points) { const [sx, sy] = w2s(x, y); ctx.fillRect(sx - 1.2, sy - 1.2, 2.6, 2.6); }
     }
+    drawRoutePath();
     drawWaypoints();
 
     if (navBusy() && S.nav.goal && S.pose.frame === 'map') {
@@ -922,7 +1146,6 @@ function renderWpCard() {
         <button data-act="close" class="text-slate-400 hover:text-slate-700"><i data-lucide="x" class="w-4 h-4"></i></button></div>
         <div class="flex flex-wrap gap-1.5">
             <button data-act="go" class="btn btn-primary !py-1 flex-1" ${navReady() && !S.estop ? '' : 'disabled'}>Đi tới</button>
-            <button data-act="task" class="btn btn-soft !py-1">+ Nhiệm vụ</button>
             <button data-act="edit" class="btn btn-soft !py-1"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
             <button data-act="del" class="btn btn-danger !py-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
         </div>`;
@@ -982,7 +1205,7 @@ window.addEventListener('beforeunload', stopTeleop);
 resizeCanvas();
 syncTeleopSliders();
 setTool('pan');
-switchTab(['dashboard', 'maps', 'waypoints', 'tasks', 'system'].includes(store.get('tab', '')) ? store.get('tab') : 'dashboard');
+switchTab(['dashboard', 'maps', 'waypoints', 'routes', 'system'].includes(store.get('tab', '')) ? store.get('tab') : 'dashboard');
 refreshMaps();
 connectWS();
 requestAnimationFrame(frame);

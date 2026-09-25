@@ -455,4 +455,5 @@ class RosBridge(Node):
                 'limits': {'max_linear': self.cfg['max_linear'], 'max_angular': self.cfg['max_angular']},
             }
         out['tasks'] = self.tasks.snapshot()   # ngoài lock: giữ đúng thứ tự khóa
+        out['run'] = self.tasks.run_snapshot()
         return out

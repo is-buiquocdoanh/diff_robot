@@ -113,3 +113,31 @@ def test_real_user_map(tmp_path):
     assert (info['width'], info['height']) == (w, h) and pix.shape == (h, w)
     assert info['has_posegraph'] is True
     assert store.image_png('map1').startswith(b'\x89PNG')
+
+
+def test_routes_crud_and_cleanup(tmp_path):
+    make_map(tmp_path, 'room1')
+    store = MapStore(tmp_path)
+    a = store.add_waypoint('room1', {'name': 'Bếp', 'type': 'KITCHEN', 'x': 0, 'y': 0})
+    b = store.add_waypoint('room1', {'name': 'Bàn 1', 'type': 'TABLE', 'x': 1, 'y': 0})
+    c = store.add_waypoint('room1', {'name': 'Bàn 2', 'type': 'TABLE', 'x': 2, 'y': 0})
+    rt = store.add_route('room1', {'name': 'Giao tầng 1', 'steps': [b['id'], c['id'], a['id'], b['id']], 'loop': True})
+    assert rt['steps'] == [b['id'], c['id'], a['id'], b['id']] and rt['loop'] is True
+    assert store.info('room1')['routes'] == 1
+    with pytest.raises(MapError):
+        store.add_route('room1', {'name': 'Giao tầng 1', 'steps': [a['id']]})       # trùng tên
+    with pytest.raises(MapError):
+        store.add_route('room1', {'name': 'X', 'steps': []})                          # rỗng
+    with pytest.raises(MapError):
+        store.add_route('room1', {'name': 'X', 'steps': ['khong_co']})                # điểm không tồn tại
+    with pytest.raises(MapError):
+        store.add_route('room1', {'name': 'X', 'steps': [a['id']] * 51})              # quá dài
+    upd = store.update_route('room1', rt['id'], {'steps': [c['id'], b['id']], 'loop': False})
+    assert upd['name'] == 'Giao tầng 1' and upd['steps'] == [c['id'], b['id']] and upd['loop'] is False
+    # xóa waypoint -> tự gỡ khỏi lộ trình
+    store.delete_waypoint('room1', c['id'])
+    assert store.find_route('room1', rt['id'])['steps'] == [b['id']]
+    store.delete_route('room1', rt['id'])
+    assert store.get_routes('room1') == []
+    with pytest.raises(MapError):
+        store.delete_route('room1', rt['id'])
