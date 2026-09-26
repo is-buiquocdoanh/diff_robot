@@ -53,6 +53,11 @@ def generate_launch_description():
         default_value="true",
         description="Có mở RViz (dùng config mặc định) hay không",
     )
+    collision_monitor_arg = DeclareLaunchArgument(
+        "collision_monitor",
+        default_value="true",
+        description="Bật Collision Monitor (chặn /cmd_vel dựa thẳng vào /scan, độc lập controller/costmap)",
+    )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     autostart = LaunchConfiguration("autostart")
@@ -71,6 +76,15 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "autostart": autostart,
             },
+            convert_types=True,
+        ),
+        allow_substs=True,
+    )
+    configured_collision_params = ParameterFile(
+        RewrittenYaml(
+            source_file=os.path.join(slam_pkg_share, "config", "collision_monitor_params.yaml"),
+            root_key="",
+            param_rewrites={"use_sim_time": use_sim_time},
             convert_types=True,
         ),
         allow_substs=True,
@@ -149,11 +163,12 @@ def generate_launch_description():
                 name="velocity_smoother",
                 output="screen",
                 parameters=[configured_params],
-                # velocity_smoother là chặng cuối: nhận cmd_vel_nav (do controller_server
-                # phát ra phía trên) -> lọc mượt -> phát thẳng ra /cmd_vel. a3_bringup hiện
-                # chưa có twist_mux -- nếu sau này thêm teleop chạy song song, đổi output
-                # map này thành cmd_vel_nav để twist_mux làm trọng tài cuối cùng.
-                remappings=remappings + [("cmd_vel", "cmd_vel_nav"), ("cmd_vel_smoothed", "cmd_vel")],
+                # velocity_smoother nhận cmd_vel_nav (do controller_server phát ra phía trên) -> lọc
+                # mượt -> phát ra cmd_vel_raw, KHÔNG phải /cmd_vel thật -- Collision Monitor bên dưới
+                # mới là chặng chặn cuối cùng trước khi lệnh xuống robot. a3_bringup hiện chưa có
+                # twist_mux -- nếu sau này thêm teleop chạy song song, chèn twist_mux giữa
+                # velocity_smoother và collision_monitor để làm trọng tài nguồn lệnh.
+                remappings=remappings + [("cmd_vel", "cmd_vel_nav"), ("cmd_vel_smoothed", "cmd_vel_raw")],
             ),
             Node(
                 package="nav2_lifecycle_manager",
@@ -179,6 +194,38 @@ def generate_launch_description():
         ]
     )
 
+    # ============================================================
+    # Collision Monitor: chặn/giảm tốc /cmd_vel dựa thẳng vào /scan (nav2_collision_monitor),
+    # tách khỏi navigation_nodes ở trên -- lifecycle manager riêng để bật/tắt độc lập controller/BT
+    # (vd. tắt tạm khi cần lùi sát vật cản để đỗ, mà không đụng tới cả cụm điều hướng).
+    # ============================================================
+    collision_monitor_group = GroupAction(
+        condition=IfCondition(LaunchConfiguration("collision_monitor")),
+        actions=[
+            Node(
+                package="nav2_collision_monitor",
+                executable="collision_monitor",
+                name="collision_monitor",
+                output="screen",
+                parameters=[configured_collision_params],
+                remappings=remappings,
+            ),
+            Node(
+                package="nav2_lifecycle_manager",
+                executable="lifecycle_manager",
+                name="lifecycle_manager_collision_monitor",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "autostart": autostart,
+                        "node_names": ["collision_monitor"],
+                    }
+                ],
+            ),
+        ],
+    )
+
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
@@ -195,8 +242,10 @@ def generate_launch_description():
             use_sim_time_arg,
             autostart_arg,
             rviz_arg,
+            collision_monitor_arg,
             localization,
             navigation_nodes,
+            collision_monitor_group,
             rviz_node,
         ]
     )

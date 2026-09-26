@@ -18,6 +18,7 @@
   <exec_depend>nav2_behaviors</exec_depend>
   <exec_depend>nav2_smoother</exec_depend>
   <exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>nav2_collision_monitor</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>dwb_core</exec_depend>
   <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>

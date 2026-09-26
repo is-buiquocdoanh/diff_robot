@@ -1,0 +1,54 @@
+# Collision Monitor — lớp an toàn cuối cùng, đứng SAU velocity_smoother và TRƯỚC /cmd_vel thật sự
+# gửi xuống robot. Không phụ thuộc BT/planner: dựa thẳng vào /scan nên vẫn chặn được va chạm ngay cả
+# khi controller_server tính sai (costmap trễ, lỗi cục bộ...). Footprint robot (khớp
+# nav2_params_*.yaml): 0.5m (dài) x 0.44m (rộng), tâm ở base_footprint.
+#
+#   PolygonStop      sát thân robot (~8cm)  -> phát hiện vật cản là dừng cứng (v=0)
+#   PolygonSlowdown  vùng rộng hơn (~20cm)  -> giảm tốc sớm trước khi phải dừng cứng
+#   FootprintApproach dùng đúng footprint đang publish của local_costmap, chiếu theo vận tốc hiện tại
+#                     để dừng SỚM nếu vài giây tới sẽ đâm vào vật cản (bù cho scan 2D không thấy được
+#                     vật thấp/method feedback nếu costmap có late update)
+collision_monitor:
+  ros__parameters:
+    use_sim_time: False
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_raw"     # velocity_smoother publish ra đây (xem navigation.launch.py)
+    cmd_vel_out_topic: "cmd_vel"        # sau khi lọc theo va chạm mới là lệnh thật gửi robot
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.2
+    source_timeout: 1.0
+    base_shift_correction: True
+    stop_pub_timeout: 2.0
+    polygons: ["PolygonStop", "PolygonSlowdown", "FootprintApproach"]
+    PolygonStop:
+      type: "polygon"
+      points: [0.33, 0.30, 0.33, -0.30, -0.33, -0.30, -0.33, 0.30]
+      action_type: "stop"
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "polygon_stop"
+      enabled: True
+    PolygonSlowdown:
+      type: "polygon"
+      points: [0.45, 0.42, 0.45, -0.42, -0.45, -0.42, -0.45, 0.42]
+      action_type: "slowdown"
+      slowdown_ratio: 0.4
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "polygon_slowdown"
+      enabled: True
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: "/local_costmap/published_footprint"
+      time_before_collision: 1.2
+      simulation_time_step: 0.1
+      max_points: 5
+      visualize: False
+      enabled: True
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "/scan"
+      enabled: True
