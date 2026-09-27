@@ -13,7 +13,7 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',
+                'laser_scan_topic': '/scan_raw',
                 # /odom_rf2o (không phải /odom) -- output của EKF (ekf.yaml, a3_bringup)
                 # mới là /odom canonical. rf2o chỉ đóng vai 1 sensor input cho EKF
                 # (xem odom0/odom1 trong ekf.yaml), không phải nguồn odometry cuối cùng.
