@@ -34,7 +34,10 @@ amcl:
     laser_min_range: 0.12       # A1M8 min range
     laser_max_range: 12.0      # A1M8 max ~12m
     laser_likelihood_max_dist: 2.0
-    max_beams: 240             # nhiều tia hơn → measurement update mạnh hơn → hội tụ nhanh
+    max_beams: 60               # 240 quá nặng CPU trên máy yếu (đo trên Inspiron 15-3567 2 nhân: CPU
+                                # gần 100% liên tục, TF map->odom trễ >1s -> Nav2 tưởng lệch vị trí,
+                                # huỷ goal, chạy Spin/Backup khôi phục -> robot "xoay vòng rồi aborted").
+                                # 60 vẫn đủ dày cho phòng nhỏ/hành lang, đúng mức mặc định nav2_bringup.
     sigma_hit: 0.15            # siết lại → particles hội tụ chặt hơn về vị trí đúng
 
     # === Beam skip — lọc tia bị chặn bởi vật động ===
@@ -44,8 +47,13 @@ amcl:
     beam_skip_threshold: 0.3
 
     # === Particle filter ===
-    min_particles: 1500        # tăng: luôn đủ hạt để không bị hội tụ sai khi lắc
-    max_particles: 5000        # tăng: phủ rộng hơn khi robot di chuyển nhanh
+    # min/max_particles từng tăng lên 1500/5000 để hội tụ chắc hơn, nhưng particle_filter là
+    # O(particles * max_beams) mỗi update -- trên máy yếu (2 nhân, không GPU rời) mức đó ăn hết CPU,
+    # TF trễ >1s, Nav2 huỷ goal liên tục. Hạ về gần mức mặc định nav2_bringup (500/2000) -- vẫn đủ hạt
+    # cho không gian trong nhà cỡ vài chục m2. Nếu chạy trên máy khoẻ và cần độ chính xác cao hơn khi
+    # robot lắc/di chuyển nhanh, có thể tăng lại (đồng thời tăng max_beams).
+    min_particles: 500
+    max_particles: 2000
     pf_err: 0.02               # giảm: yêu cầu particle filter chính xác hơn
     pf_z: 0.99
     resample_interval: 2       # resample mỗi 2 update thay vì 1 → tránh mất đa dạng hạt khi lắc
