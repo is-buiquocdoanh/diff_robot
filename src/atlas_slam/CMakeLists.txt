@@ -8,4 +8,9 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/collision_alarm_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

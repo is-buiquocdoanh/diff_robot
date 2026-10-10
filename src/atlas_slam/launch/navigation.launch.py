@@ -18,8 +18,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
-from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -57,6 +57,15 @@ def generate_launch_description():
         "collision_monitor",
         default_value="true",
         description="Bật Collision Monitor (chặn /cmd_vel dựa thẳng vào /scan, độc lập controller/costmap)",
+    )
+    collision_alarm_arg = DeclareLaunchArgument(
+        "collision_alarm",
+        default_value="true",
+        description=(
+            "Phát âm thanh cảnh báo khi Collision Monitor đang chặn /cmd_vel vì vật cản, tắt khi hết "
+            "vật cản (xem docs/canh_bao_am_thanh.md). Vô hại nếu collision_monitor=false (không bao giờ "
+            "có chênh lệch cmd_vel_raw/cmd_vel để báo)."
+        ),
     )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -226,6 +235,26 @@ def generate_launch_description():
         ],
     )
 
+    # collision_monitor=false thì không có node nào relay cmd_vel_raw (velocity_smoother) ->
+    # cmd_vel (robot) nữa -- robot sẽ đứng im hoàn toàn nếu thiếu chặng này. Dùng topic_tools
+    # relay làm chuyển tiếp thẳng khi tắt Collision Monitor để không gãy chuỗi lệnh.
+    collision_monitor_bypass = ExecuteProcess(
+        condition=UnlessCondition(LaunchConfiguration("collision_monitor")),
+        cmd=["ros2", "run", "topic_tools", "relay", "cmd_vel_raw", "cmd_vel"],
+        output="screen",
+    )
+
+    # Cảnh báo âm thanh khi Collision Monitor đang chặn /cmd_vel vì vật cản (xem
+    # docs/canh_bao_am_thanh.md và scripts/collision_alarm_node.py).
+    collision_alarm_node = Node(
+        package="atlas_slam",
+        executable="collision_alarm_node.py",
+        name="collision_alarm",
+        output="screen",
+        parameters=[{"use_sim_time": use_sim_time}],
+        condition=IfCondition(LaunchConfiguration("collision_alarm")),
+    )
+
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
@@ -243,9 +272,12 @@ def generate_launch_description():
             autostart_arg,
             rviz_arg,
             collision_monitor_arg,
+            collision_alarm_arg,
             localization,
             navigation_nodes,
             collision_monitor_group,
+            collision_monitor_bypass,
+            collision_alarm_node,
             rviz_node,
         ]
     )
