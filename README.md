@@ -13,12 +13,20 @@ kiến trúc driver của dự án mecanum trước đó.
 colcon build --symlink-install && source install/setup.bash
 ```
 
+Code ESP32 (`src/diff_drive_ros`, `src/diff_tune_PID`) nằm luôn trong repo — clone về là có,
+không cần repo riêng. Đây là project PlatformIO (không có `package.xml`) nên `colcon build`
+tự bỏ qua; build/nạp bằng `pio run -t upload` trong thư mục tương ứng.
+
 ## Cấu trúc
 
 - `src/diff_drive_ros` — firmware ESP32 (PlatformIO): đọc frame lệnh từ ROS qua Serial/UART2,
   điều khiển động cơ qua BTS7960, đọc encoder qua PCNT, PID tốc độ tùy chọn (tune
   trực tiếp qua `tools/web/pid_tuner.html`, không cần firmware riêng). Xem
   `src/diff_drive_ros/README.md`.
+- `src/diff_tune_PID` — firmware ESP32 (PlatformIO) **riêng để tune PID** tốc độ bánh: vòng PID
+  full-authority 50Hz, cùng sơ đồ chân với robot thật, đi kèm web tool
+  `tools/web/pid_tuner.html` (Web Serial, Chrome/Edge) chỉnh Kp/Ki/Kd + vẽ đồ thị RPM realtime.
+  Nạp: `cd src/diff_tune_PID && pio run -t upload`. Xem `src/diff_tune_PID/Quy_trinh_tune_PID.md`.
 - `src/a3_driver` — package ROS2:
   - `kinematic.py`: subscribe `/cmd_vel`, tính động học vi sai 2 bánh, publish `Velquery`.
   - `serial_bridge_node.py`: node duy nhất dùng chung 1 cổng USB cho cả 2 chiều —

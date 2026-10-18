@@ -356,7 +356,7 @@ false`.
 
 ## 13. Tune PID bằng web tool (không cần firmware riêng)
 
-Trước đây phải nạp 1 firmware riêng (project `diff_tune_PID`) để tune bằng
+Trước đây phải nạp 1 firmware riêng (project [`src/diff_tune_PID`](../diff_tune_PID/) — vẫn giữ trong repo) để tune bằng
 web tool, tune xong lại chép tay Kp/Ki/Kd sang `main.cpp` rồi nạp lại lần
 nữa — mất thời gian đổi qua đổi lại 2 project. Giờ giao thức tune đã gộp
 thẳng vào `main.cpp` (dùng lại đúng `WheelPID`/`leftPid`/`rightPid` đang có),
@@ -397,7 +397,7 @@ python3 -m http.server 8000
 hoặc mở trực tiếp file bằng Chrome nếu trình duyệt không chặn `file://`.
 
 Quy trình test/tune, đọc đồ thị, chỉ số overshoot/rise time/settle time —
-xem hướng dẫn gốc trong `~/diff_tune_PID/README.md` (Bước 3-4), áp dụng y
+xem hướng dẫn gốc trong [`src/diff_tune_PID/Quy_trinh_tune_PID.md`](../diff_tune_PID/Quy_trinh_tune_PID.md) (Bước 3-4), áp dụng y
 hệt vì cùng giao thức.
 
 **Lưu ý khi mang bộ số về sản xuất**: khi tune, PID chạy **full-authority**
